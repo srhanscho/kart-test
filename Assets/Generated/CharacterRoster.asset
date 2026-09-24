@@ -1,0 +1,219 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cc50f62613dfb584fb6e99242090e681, type: 3}
+  m_Name: CharacterRoster
+  m_EditorClassIdentifier: Assembly-CSharp::CharacterRoster
+  characters:
+  - displayName: Rusty Rocket
+    uiColor: {r: 0.9098039, g: 0.33333334, b: 0.3137255, a: 1}
+    kart:
+      prefab: {fileID: 919132149155446097, guid: 31b6cf54943dfbc4e85a92a635fcd204, type: 3}
+      position: {x: 0.0000000028000247, y: 0.058087405, z: 0.03202855}
+      rotation: {x: 0, y: 1, z: 0, w: -0.00000004371139}
+      scale: 0.2469702
+    driver:
+      prefab: {fileID: 919132149155446097, guid: 8724c0506be98484d8333b7a2971a542, type: 3}
+      position: {x: -2.9493272e-15, y: 0.6027188, z: -0.20719683}
+      rotation: {x: 0, y: 0, z: 0, w: 1}
+      scale: 2.042721
+    driveClip: {fileID: -6544096145777225072, guid: 8724c0506be98484d8333b7a2971a542, type: 3}
+    driverAvatar: {fileID: 9000000, guid: 8724c0506be98484d8333b7a2971a542, type: 3}
+    speed: 1
+    acceleration: 1
+    handling: 1
+  - displayName: Piper Piston
+    uiColor: {r: 0.29803923, g: 0.76862746, b: 0.41568628, a: 1}
+    kart:
+      prefab: {fileID: 919132149155446097, guid: 2e013f03f97bb984e936c54c842c5c56, type: 3}
+      position: {x: 0.0000000028000247, y: 0.058087405, z: 0.03202855}
+      rotation: {x: 0, y: 1, z: 0, w: -0.00000004371139}
+      scale: 0.2469702
+    driver:
+      prefab: {fileID: 919132149155446097, guid: 6757be9dfa45ad54f91d98f6065c31f7, type: 3}
+      position: {x: -2.4949895e-15, y: 0.5866998, z: -0.21624377}
+      rotation: {x: 0, y: 0, z: 0, w: 1}
+      scale: 1.7280442
+    driveClip: {fileID: -6544096145777225072, guid: 6757be9dfa45ad54f91d98f6065c31f7, type: 3}
+    driverAvatar: {fileID: 9000000, guid: 6757be9dfa45ad54f91d98f6065c31f7, type: 3}
+    speed: 0.97
+    acceleration: 1.06
+    handling: 0.97
+  - displayName: Max Muffler
+    uiColor: {r: 0.9529412, g: 0.6039216, b: 0.23137255, a: 1}
+    kart:
+      prefab: {fileID: 919132149155446097, guid: 367fbed6f573d344481d920976aaa9d1, type: 3}
+      position: {x: 0.0000000028000247, y: 0.058087405, z: 0.03202855}
+      rotation: {x: 0, y: 1, z: 0, w: -0.00000004371139}
+      scale: 0.2469702
+    driver:
+      prefab: {fileID: 919132149155446097, guid: 5d86f8edb669f9d409a5f209b796a3d0, type: 3}
+      position: {x: -2.9627438e-15, y: 0.6183945, z: -0.20692967}
+      rotation: {x: 0, y: 0, z: 0, w: 1}
+      scale: 2.0520134
+    driveClip: {fileID: -6544096145777225072, guid: 5d86f8edb669f9d409a5f209b796a3d0, type: 3}
+    driverAvatar: {fileID: 9000000, guid: 5d86f8edb669f9d409a5f209b796a3d0, type: 3}
+    speed: 1.05
+    acceleration: 0.96
+    handling: 0.99
+  - displayName: Luna Lugnut
+    uiColor: {r: 0.9098039, g: 0.93333334, b: 0.95686275, a: 1}
+    kart:
+      prefab: {fileID: 919132149155446097, guid: c64ec73b9027d124ca054505f1c74bfb, type: 3}
+      position: {x: 0.0000000028000247, y: 0.058087405, z: 0.03202855}
+      rotation: {x: 0, y: 1, z: 0, w: -0.00000004371139}
+      scale: 0.2469702
+    driver:
+      prefab: {fileID: 919132149155446097, guid: a5088571f21c23c42815d5d16b2079df, type: 3}
+      position: {x: -2.6889387e-15, y: 0.59984183, z: -0.21238178}
+      rotation: {x: 0, y: 0, z: 0, w: 1}
+      scale: 1.8623744
+    driveClip: {fileID: -6544096145777225072, guid: a5088571f21c23c42815d5d16b2079df, type: 3}
+    driverAvatar: {fileID: 9000000, guid: a5088571f21c23c42815d5d16b2079df, type: 3}
+    speed: 0.97
+    acceleration: 0.98
+    handling: 1.05
+  - displayName: Benny Burnout
+    uiColor: {r: 1, g: 0.47843137, b: 0.27058825, a: 1}
+    kart:
+      prefab: {fileID: 919132149155446097, guid: 331f5bf6ac88db14dbbfd49dee1bd828, type: 3}
+      position: {x: -0, y: -0, z: -0}
+      rotation: {x: 0, y: 1, z: 0, w: -0.00000004371139}
+      scale: 3.06383
+    driver:
+      prefab: {fileID: 919132149155446097, guid: d8fa5f884129c9f47a77a245b5d25ed4, type: 3}
+      position: {x: -2.4368352e-15, y: 0.7898529, z: -0.27930653}
+      rotation: {x: 0, y: 0, z: 0, w: 1}
+      scale: 1.6877661
+    driveClip: {fileID: -6544096145777225072, guid: d8fa5f884129c9f47a77a245b5d25ed4, type: 3}
+    driverAvatar: {fileID: 9000000, guid: d8fa5f884129c9f47a77a245b5d25ed4, type: 3}
+    speed: 1.07
+    acceleration: 0.97
+    handling: 0.94
+  - displayName: Dash Dynamo
+    uiColor: {r: 0.654902, g: 0.47058824, b: 0.9098039, a: 1}
+    kart:
+      prefab: {fileID: 919132149155446097, guid: e3bb90619135da6479ed8716a1f6460e, type: 3}
+      position: {x: -0, y: -0, z: -0}
+      rotation: {x: 0, y: 1, z: 0, w: -0.00000004371139}
+      scale: 2.8799999
+    driver:
+      prefab: {fileID: 919132149155446097, guid: f108a63dc2b76fe488bd6b5d8767c2cb, type: 3}
+      position: {x: -2.6906307e-15, y: 1.5694959, z: 0.10397695}
+      rotation: {x: 0, y: 0, z: 0, w: 1}
+      scale: 1.8635463
+    driveClip: {fileID: -6544096145777225072, guid: f108a63dc2b76fe488bd6b5d8767c2cb, type: 3}
+    driverAvatar: {fileID: 9000000, guid: f108a63dc2b76fe488bd6b5d8767c2cb, type: 3}
+    speed: 0.95
+    acceleration: 1.09
+    handling: 0.96
+  - displayName: Ruby Revs
+    uiColor: {r: 0.9098039, g: 0.3137255, b: 0.43137255, a: 1}
+    kart:
+      prefab: {fileID: 919132149155446097, guid: 17e1d2392387bc945bafaf28e4f84ef4, type: 3}
+      position: {x: -0, y: -0, z: -0}
+      rotation: {x: 0, y: 1, z: 0, w: -0.00000004371139}
+      scale: 3.4285715
+    driver:
+      prefab: {fileID: 919132149155446097, guid: 87fd295e3e540734a9d7ccab838ea0a8, type: 3}
+      position: {x: -2.520175e-15, y: 0.9242194, z: -0.18981722}
+      rotation: {x: 0, y: 0, z: 0, w: 1}
+      scale: 1.7454877
+    driveClip: {fileID: -6544096145777225072, guid: 87fd295e3e540734a9d7ccab838ea0a8, type: 3}
+    driverAvatar: {fileID: 9000000, guid: 87fd295e3e540734a9d7ccab838ea0a8, type: 3}
+    speed: 1.02
+    acceleration: 0.97
+    handling: 1.03
+  - displayName: Nova Nitro
+    uiColor: {r: 0.3529412, g: 0.6901961, b: 1, a: 1}
+    kart:
+      prefab: {fileID: 919132149155446097, guid: 790d04b5730c7464bae2a4e3b1a00944, type: 3}
+      position: {x: -0, y: -0, z: -0}
+      rotation: {x: 0, y: 1, z: 0, w: -0.00000004371139}
+      scale: 3.4285715
+    driver:
+      prefab: {fileID: 919132149155446097, guid: 615c1d24f7ad86745bc5ae2f3177b3de, type: 3}
+      position: {x: -2.4909613e-15, y: 1.1511619, z: -0.19039895}
+      rotation: {x: 0, y: 0, z: 0, w: 1}
+      scale: 1.725254
+    driveClip: {fileID: -6544096145777225072, guid: 615c1d24f7ad86745bc5ae2f3177b3de, type: 3}
+    driverAvatar: {fileID: 9000000, guid: 615c1d24f7ad86745bc5ae2f3177b3de, type: 3}
+    speed: 1.03
+    acceleration: 1
+    handling: 0.98
+  - displayName: Sally Skid
+    uiColor: {r: 1, g: 0.83137256, b: 0.2784314, a: 1}
+    kart:
+      prefab: {fileID: 919132149155446097, guid: 92b47899d65fda141ba924a13fd2c983, type: 3}
+      position: {x: -8.52677e-15, y: -0, z: -0.00000009753488}
+      rotation: {x: 0, y: 1, z: 0, w: -0.00000004371139}
+      scale: 3.2727275
+    driver:
+      prefab: {fileID: 919132149155446097, guid: ee19e933e2d545e43a0c1f671ee47f22, type: 3}
+      position: {x: -2.716779e-15, y: 0.8488605, z: -0.17499328}
+      rotation: {x: 0, y: 0, z: 0, w: 1}
+      scale: 1.8816568
+    driveClip: {fileID: -6544096145777225072, guid: ee19e933e2d545e43a0c1f671ee47f22, type: 3}
+    driverAvatar: {fileID: 9000000, guid: ee19e933e2d545e43a0c1f671ee47f22, type: 3}
+    speed: 1.06
+    acceleration: 0.94
+    handling: 1
+  - displayName: Gigi Gearbox
+    uiColor: {r: 0.38431373, g: 0.8392157, b: 0.78431374, a: 1}
+    kart:
+      prefab: {fileID: 919132149155446097, guid: 666c6de23831dcd41bba604e63637125, type: 3}
+      position: {x: -0, y: -0, z: -0}
+      rotation: {x: 0, y: 1, z: 0, w: -0.00000004371139}
+      scale: 3.4285715
+    driver:
+      prefab: {fileID: 919132149155446097, guid: f17e2e4bddffe134eb7fc9ae352cc8eb, type: 3}
+      position: {x: -2.9148915e-15, y: 1.3664405, z: -0.18195747}
+      rotation: {x: 0, y: 0, z: 0, w: 1}
+      scale: 2.0188706
+    driveClip: {fileID: -6544096145777225072, guid: f17e2e4bddffe134eb7fc9ae352cc8eb, type: 3}
+    driverAvatar: {fileID: 9000000, guid: f17e2e4bddffe134eb7fc9ae352cc8eb, type: 3}
+    speed: 0.96
+    acceleration: 1.04
+    handling: 1.01
+  - displayName: Otto Overdrive
+    uiColor: {r: 0.78039217, g: 0.78039217, b: 0.78039217, a: 1}
+    kart:
+      prefab: {fileID: 919132149155446097, guid: ba80e2c77b8b0c444a9e7612e0959b5a, type: 3}
+      position: {x: -0, y: -0, z: -0}
+      rotation: {x: 0, y: 1, z: 0, w: -0.00000004371139}
+      scale: 3.4285715
+    driver:
+      prefab: {fileID: 919132149155446097, guid: 091c7285318afb3489a3d823724b01fb, type: 3}
+      position: {x: -2.8932037e-15, y: 1.221042, z: 0.7673249}
+      rotation: {x: 0, y: 0, z: 0, w: 1}
+      scale: 2.0038495
+    driveClip: {fileID: -6544096145777225072, guid: 091c7285318afb3489a3d823724b01fb, type: 3}
+    driverAvatar: {fileID: 9000000, guid: 091c7285318afb3489a3d823724b01fb, type: 3}
+    speed: 0.97
+    acceleration: 1.07
+    handling: 0.96
+  - displayName: Chip Chassis
+    uiColor: {r: 0.7254902, g: 0.54509807, b: 0.36862746, a: 1}
+    kart:
+      prefab: {fileID: 919132149155446097, guid: 0b1c7277d404b46438243e1fef06103d, type: 3}
+      position: {x: -0, y: -0, z: -0}
+      rotation: {x: 0, y: 1, z: 0, w: -0.00000004371139}
+      scale: 3.2727275
+    driver:
+      prefab: {fileID: 919132149155446097, guid: ae67a36ef40f2ed4c80598251a23eeec, type: 3}
+      position: {x: -2.9148928e-15, y: 0.6100118, z: -0.17104836}
+      rotation: {x: 0, y: 0, z: 0, w: 1}
+      scale: 2.0188715
+    driveClip: {fileID: -6544096145777225072, guid: ae67a36ef40f2ed4c80598251a23eeec, type: 3}
+    driverAvatar: {fileID: 9000000, guid: ae67a36ef40f2ed4c80598251a23eeec, type: 3}
+    speed: 0.98
+    acceleration: 0.98
+    handling: 1.05
