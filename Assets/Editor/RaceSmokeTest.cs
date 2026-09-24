@@ -848,8 +848,8 @@ public static class RaceSmokeTest
         if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null) return;
         var surfaces = Object.FindObjectsByType<TrackSurface>();
         if (surfaces.Length == 0) return;
-        Bounds b = surfaces[0].GetComponent<Renderer>().bounds;
-        foreach (var t in surfaces) b.Encapsulate(t.GetComponent<Renderer>().bounds);
+        Bounds b = surfaces[0].GetComponent<Collider>().bounds;
+        foreach (var t in surfaces) b.Encapsulate(t.GetComponent<Collider>().bounds);
         var cam = new GameObject("TopDownCam").AddComponent<Camera>();
         cam.orthographic = true;
         cam.transform.position = b.center + Vector3.up * 200f;

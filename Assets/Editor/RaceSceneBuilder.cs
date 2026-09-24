@@ -200,6 +200,8 @@ public static class RaceSceneBuilder
             }
         }
 
+        BuildTrackCollision(trackPieces, joints, log);
+
         float closureError = Vector3.Distance(cursor, startCursor);
         float headingError = Vector3.Angle(heading, startHeading);
         log.AppendLine($"pieces placed={Layout.Length}, loop closure error={closureError:F4} m, heading error={headingError:F2} deg, " +
@@ -499,18 +501,100 @@ public static class RaceSceneBuilder
                 go.transform.SetParent(parent, false);
                 go.transform.SetPositionAndRotation(pos, rot);
                 go.transform.localScale = new Vector3(mirror ? -scale : scale, scale, scale);
-                foreach (var mf in go.GetComponentsInChildren<MeshFilter>())
-                {
-                    var mc = mf.gameObject.AddComponent<MeshCollider>();
-                    mc.sharedMesh = mf.sharedMesh;
-                    mf.gameObject.AddComponent<TrackSurface>();
-                }
                 cursor = pos + rot * (exit.pos * scale);
                 heading = SnapAxis(exitDir);
                 return go;
             }
         }
         throw new Exception($"No orientation of {def.name} matches heading {heading}, turn {turn}, shift {shift}, climb {climb}");
+    }
+
+    /// <summary>
+    /// One merged, welded collision mesh for the whole track. Per-piece colliders left two coincident
+    /// vertical end faces (slab + wall ends) at every joint, and the kart's capsule caught on them at
+    /// speed: a sudden full stop ("frenon") at seams, also at the hill joints. Here the joint-plane
+    /// faces are dropped and shared vertices welded, so the road is one continuous surface.
+    /// Submesh 0 = road/curbs/walls, submesh 1 = grass (off-road).
+    /// </summary>
+    static void BuildTrackCollision(Transform trackPieces, List<(Vector3 pos, Vector3 dir)> joints, StringBuilder log)
+    {
+        const float planeEps = 0.03f, weld = 0.01f;
+        var verts = new List<Vector3>();
+        var index = new Dictionary<Vector3Int, int>();
+        var tris = new[] { new List<int>(), new List<int>() };
+        int total = 0, removed = 0;
+
+        int Vert(Vector3 v)
+        {
+            var key = new Vector3Int(Mathf.RoundToInt(v.x / weld), Mathf.RoundToInt(v.y / weld), Mathf.RoundToInt(v.z / weld));
+            if (!index.TryGetValue(key, out int i)) { i = verts.Count; verts.Add(v); index[key] = i; }
+            return i;
+        }
+
+        bool OnJointPlane(Vector3 a, Vector3 b, Vector3 c)
+        {
+            foreach (var (pos, dir) in joints)
+            {
+                bool all = true;
+                foreach (var v in new[] { a, b, c })
+                {
+                    Vector3 d = v - pos;
+                    if (Mathf.Abs(Vector3.Dot(d, dir)) > planeEps || d.magnitude > RoadWidth * 1.2f) { all = false; break; }
+                }
+                if (all) return true;
+            }
+            return false;
+        }
+
+        foreach (var mf in trackPieces.GetComponentsInChildren<MeshFilter>())
+        {
+            Mesh mesh = mf.sharedMesh;
+            if (mesh == null) continue;
+            Matrix4x4 m = mf.transform.localToWorldMatrix;
+            bool flip = m.determinant < 0f;
+            Vector3[] mv = mesh.vertices;
+            var world = new Vector3[mv.Length];
+            for (int i = 0; i < mv.Length; i++) world[i] = m.MultiplyPoint3x4(mv[i]);
+            Material[] mats = mf.GetComponent<MeshRenderer>()?.sharedMaterials ?? new Material[0];
+            for (int sm = 0; sm < mesh.subMeshCount; sm++)
+            {
+                bool grass = sm < mats.Length && mats[sm] != null && mats[sm].name.ToLowerInvariant().Contains("grass");
+                int[] t = mesh.GetTriangles(sm);
+                for (int i = 0; i + 2 < t.Length; i += 3)
+                {
+                    total++;
+                    Vector3 a = world[t[i]], b = world[t[i + 1]], c = world[t[i + 2]];
+                    if (OnJointPlane(a, b, c)) { removed++; continue; }
+                    int ia = Vert(a), ib = Vert(b), ic = Vert(c);
+                    if (ia == ib || ib == ic || ia == ic) { removed++; continue; }
+                    var list = tris[grass ? 1 : 0];
+                    if (flip) { list.Add(ia); list.Add(ic); list.Add(ib); }
+                    else { list.Add(ia); list.Add(ib); list.Add(ic); }
+                }
+            }
+        }
+
+        var col = new Mesh { name = "TrackCollision", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+        col.SetVertices(verts);
+        col.subMeshCount = 2;
+        col.SetTriangles(tris[0], 0);
+        col.SetTriangles(tris[1], 1);
+        col.RecalculateNormals();
+        col.RecalculateBounds();
+        EnsureFolder(GeneratedDir);
+        string path = GeneratedDir + "/TrackCollision.asset";
+        AssetDatabase.DeleteAsset(path);
+        AssetDatabase.CreateAsset(col, path);
+
+        var go = new GameObject("TrackCollision");
+        go.transform.SetParent(trackPieces, false);
+        go.isStatic = true;
+        var mc = go.AddComponent<MeshCollider>();
+        mc.sharedMesh = col;
+        var surface = go.AddComponent<TrackSurface>();
+        surface.offroadSubmeshes = new[] { false, true };
+        log.AppendLine($"track collision: merged {total} triangles into {tris[0].Count / 3 + tris[1].Count / 3} " +
+                       $"(removed {removed} joint-plane/degenerate), {verts.Count} welded vertices");
     }
 
     static Opening Mirror(Opening o, bool mirror) =>
@@ -1302,7 +1386,10 @@ public static class RaceSceneBuilder
         EnsureFolder(dir);
         var cache = new Dictionary<(Material, bool), Material>();
         int renderers = 0;
-        foreach (var r in Object.FindObjectsByType<Renderer>(FindObjectsInactive.Include))
+        var written = new HashSet<string>();
+        // Sorted by hierarchy path so generated names are stable between builds (no orphaned copies).
+        foreach (var r in Object.FindObjectsByType<Renderer>(FindObjectsInactive.Include)
+                     .OrderBy(x => OrderKey(x.transform), StringComparer.Ordinal).ThenBy(x => x.GetType().Name, StringComparer.Ordinal))
         {
             if (r is ParticleSystemRenderer || r is TrailRenderer) continue;
             string path = PathOf(r.transform);
@@ -1326,6 +1413,7 @@ public static class RaceSceneBuilder
                     }
                     string file = $"{dir}/{Sanitize(m.name)}_{cache.Count}.mat";
                     AssetDatabase.CreateAsset(m, file);
+                    written.Add(file);
                 }
                 mats[i] = m;
                 changed = true;
@@ -1336,6 +1424,11 @@ public static class RaceSceneBuilder
                 renderers++;
             }
         }
+        foreach (string guid in AssetDatabase.FindAssets("t:Material", new[] { dir }))
+        {
+            string stale = AssetDatabase.GUIDToAssetPath(guid);
+            if (!written.Contains(stale)) AssetDatabase.DeleteAsset(stale);
+        }
         foreach (var cam in Object.FindObjectsByType<Camera>(FindObjectsInactive.Include))
         {
             var fx = cam.gameObject.AddComponent<BloomEffect>();
@@ -1343,6 +1436,15 @@ public static class RaceSceneBuilder
             cam.allowHDR = true;
         }
         log.AppendLine($"toon: {cache.Count} toon materials for {renderers} renderers; bloom on {Object.FindObjectsByType<BloomEffect>(FindObjectsInactive.Include).Length} cameras");
+    }
+
+    /// <summary>Unique, build-stable hierarchy key (root order + sibling indices).</summary>
+    static string OrderKey(Transform t)
+    {
+        var sb = new StringBuilder();
+        for (; t != null; t = t.parent)
+            sb.Insert(0, (t.parent == null ? t.gameObject.scene.GetRootGameObjects().ToList().IndexOf(t.gameObject) : t.GetSiblingIndex()).ToString("D5") + "/");
+        return sb.ToString();
     }
 
     static string PathOf(Transform t)

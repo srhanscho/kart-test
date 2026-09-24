@@ -2,7 +2,8 @@ using UnityEngine;
 
 /// <summary>
 /// Marks a track mesh collider as drivable road. Submeshes whose material name
-/// contains "grass" count as off-road (the kart slows down there).
+/// contains "grass" count as off-road (the kart slows down there). The merged track
+/// collision mesh has no renderer, so it lists its off-road submeshes explicitly.
 /// </summary>
 [RequireComponent(typeof(MeshCollider))]
 public class TrackSurface : MonoBehaviour
@@ -11,16 +12,17 @@ public class TrackSurface : MonoBehaviour
     int[] submeshIndexEnd;
     bool[] submeshIsOffroad;
 
+    /// <summary>Per-submesh off-road flags for a collider-only mesh (no MeshRenderer).</summary>
+    public bool[] offroadSubmeshes;
+
     void Awake() => Cache();
 
     void Cache()
     {
-        var meshFilter = GetComponent<MeshFilter>();
         var meshRenderer = GetComponent<MeshRenderer>();
-        if (meshFilter == null || meshFilter.sharedMesh == null || meshRenderer == null) return;
-
-        Mesh mesh = meshFilter.sharedMesh;
-        Material[] mats = meshRenderer.sharedMaterials;
+        Mesh mesh = GetComponent<MeshCollider>().sharedMesh;
+        if (mesh == null) return;
+        Material[] mats = meshRenderer != null ? meshRenderer.sharedMaterials : new Material[0];
         submeshIndexStart = new int[mesh.subMeshCount];
         submeshIndexEnd = new int[mesh.subMeshCount];
         submeshIsOffroad = new bool[mesh.subMeshCount];
@@ -30,7 +32,9 @@ public class TrackSurface : MonoBehaviour
             submeshIndexStart[i] = sub.indexStart;
             submeshIndexEnd[i] = sub.indexStart + sub.indexCount;
             string matName = i < mats.Length && mats[i] != null ? mats[i].name.ToLowerInvariant() : "";
-            submeshIsOffroad[i] = matName.Contains("grass");
+            submeshIsOffroad[i] = offroadSubmeshes != null && offroadSubmeshes.Length > 0
+                ? i < offroadSubmeshes.Length && offroadSubmeshes[i]
+                : matName.Contains("grass");
         }
     }
 

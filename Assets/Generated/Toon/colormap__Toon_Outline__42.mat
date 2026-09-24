@@ -7,7 +7,7 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: colormap__Toon_Outline__37
+  m_Name: colormap__Toon_Outline__42
   m_Shader: {fileID: 4800000, guid: ac4e2a7ab75585a4282d28063926d8ae, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
