@@ -19,15 +19,29 @@ A couch kart racer for 1–4 players, built in Unity 6, where **each player uses
 | **Presentation** | Animated logo intro at launch and a Mario Kart-style camera flyover of the track before each race (both skippable). |
 | **Look & sound** | Toon shading with outlines, bloom, procedural engine sounds and chiptune music (the music speeds up on the final lap). |
 
+## Tracks
+
+| Night Circuit | Sunset Grand Prix |
+|---------------|-------------------|
+| ![Night Circuit](docs/screenshots/track_night_circuit.png) | ![Sunset Grand Prix](docs/screenshots/track_sunset_grand_prix.png) |
+
+| Toy Box Hills | Neon Night Loop |
+|---------------|-----------------|
+| ![Toy Box Hills](docs/screenshots/track_toy_box_hills.png) | ![Neon Night Loop](docs/screenshots/track_neon_night_loop.png) |
+
 ## Screenshots
 
-| Lobby | 2-player split screen |
+| Lobby with track picker | 2-player split screen |
 |-------|------------------------|
 | ![Lobby](docs/screenshots/ui_lobby.png) | ![2-player split screen](docs/screenshots/ui_race_2p.png) |
 
 | 4-player split screen | Results podium |
 |------------------------|----------------|
 | ![4-player split screen](docs/screenshots/ui_race_4p.png) | ![Results podium](docs/screenshots/ui_results_podium.png) |
+
+| Launch intro | Pause menu |
+|--------------|------------|
+| ![Launch intro](docs/screenshots/intro_logo.png) | ![Pause menu](docs/screenshots/ui_pause.png) |
 
 ## Quick start
 
