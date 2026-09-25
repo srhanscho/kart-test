@@ -18,7 +18,7 @@ using Random = System.Random;
 /// the RaceManager (lobby, phone server, CPU racers) and decoration.
 /// Batchmode: -executeMethod RaceSceneBuilder.Build
 /// </summary>
-public static class RaceSceneBuilder
+public static partial class RaceSceneBuilder
 {
     const string RacingKit = "Assets/ThirdParty/Kenney/RacingKit/";
     const string ToyKit = "Assets/ThirdParty/Kenney/ToyCarKit/";
@@ -28,27 +28,10 @@ public static class RaceSceneBuilder
     const string GeneratedDir = "Assets/Generated";
     const string Tag = "[RaceSceneBuilder] ";
 
-    const float RoadWidth = 12f;      // metres, full track width incl. raised edges
+    static float RoadWidth = 12f;     // metres, full width of the track being built (set per track)
     const float KartWidth = 1.8f;     // metres
     const float PropScale = 1f;       // racing-kit props (grandstands, flags) are already in metres x10
 
-    // Track look: "track-striped-wide" (red/white) or "track-wide" (orange). Both are copied into ToyCarKit.
-    const string TrackStyle = "track-striped-wide";
-
-    // Toy-kit pieces used by the layout. The straight must come first (its width defines the scale).
-    static readonly (string Key, string Value)[] PieceFiles =
-    {
-        ("ST", "straight"), ("BU", "straight-bump-up"), ("BD", "straight-bump-down"), ("HL", "straight-hill-complete"),
-        ("CS", "corner-small"), ("CL", "corner-large"), ("CV", "curve"),
-    };
-
-    // Circuit, in race order from the origin heading +Z. ST straight, BU/BD bump up/down, HU/HD hill up/down,
-    // CS/CL small (hairpin) / large corner + R/L, CV S-curve + '+' (shift right) / '-' (shift left).
-    static readonly string[] Layout =
-        ("ST ST ST ST ST CLR ST BU ST CSR CSR ST CSL CV+ CV- CSL ST HU ST HD " +
-         "CLR ST ST CLR ST ST ST ST BU ST CLR ST").Split(' ');
-    const int FinishAfterPiece = 2; // finish line at the exit of this piece (grid fits behind it)
-    const int Laps = 3;
     const int KartCount = 6;
     const float KartLength = 3.3f;    // collider length shared by all karts
     const float DriverHeight = 1.25f; // seated driver height in metres
@@ -99,367 +82,6 @@ public static class RaceSceneBuilder
             Debug.LogError(Tag + "FAILED: " + e + "\nPartial report:\n" + buildLog);
             if (Application.isBatchMode) EditorApplication.Exit(1);
         }
-    }
-
-    static void BuildInternal()
-    {
-        var log = buildLog = new StringBuilder();
-        EnsureModelsReadable("Assets/ThirdParty/Kenney");
-        FixKenneyTextures(log);
-
-        GameObject standPrefab = Load(RacingKit + "grandStand.fbx");
-        GameObject flagPrefab = Load(RacingKit + "flagCheckers.fbx");
-        GameObject treeLargePrefab = Load(RacingKit + "treeLarge.fbx");
-        GameObject treeSmallPrefab = Load(RacingKit + "treeSmall.fbx");
-        GameObject gatePrefab = Load(ToyKit + "gate-finish.fbx");
-        GameObject supportPrefab = Load(ToyKit + "supports-wide.fbx");
-
-        Scene scene = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Single);
-
-        // ---- Measure toy-kit track pieces --------------------------------------------------------
-        var pieces = new Dictionary<string, PieceDef>();
-        float trackUnit = 0f, tileScale = 1f;
-        foreach (var kv in PieceFiles)
-        {
-            GameObject prefab = Load($"{ToyKit}{TrackStyle}-{kv.Value}.fbx");
-            List<Vector3> verts = PrefabVertices(prefab);
-            if (trackUnit <= 0f)
-            {
-                Bounds sb = BoundsOf(verts); // first entry is the straight: its width defines the track width
-                trackUnit = Mathf.Min(sb.size.x, sb.size.z);
-                tileScale = RoadWidth / trackUnit;
-            }
-            var def = new PieceDef { name = kv.Key, prefab = prefab, openings = FindConnectors(verts, trackUnit) };
-            if (def.openings.Length != 2)
-                throw new Exception($"{prefab.name}: expected 2 connectors, found {def.openings.Length}");
-            pieces[kv.Key] = def;
-            log.AppendLine($"piece {kv.Key,-3} {prefab.name}: size={BoundsOf(verts).size:F2} connectors {Describe(def.openings)}");
-        }
-        log.AppendLine($"track style={TrackStyle}, unit width={trackUnit:F3}, scale={tileScale:F2} -> road {RoadWidth} m wide");
-
-        // ---- Lay out the circuit from the token list ----------------------------------------------
-        var root = new GameObject("Track").transform;
-        var trackPieces = new GameObject("Pieces").transform;
-        trackPieces.SetParent(root);
-        var supports = new GameObject("Supports").transform;
-        supports.SetParent(root);
-
-        Vector3 cursor = Vector3.zero;
-        Vector3 heading = Vector3.forward;
-        Vector3 startCursor = cursor, startHeading = heading;
-        var joints = new List<(Vector3 pos, Vector3 dir)> { (cursor, heading) };
-        var checkpointCandidates = new List<(int piece, Vector3 pos, Vector3 dir)>();
-        var pieceBounds = new List<Bounds>();
-        (Vector3 pos, Vector3 dir) finish = default;
-        var straightCenters = new List<(Vector3 pos, Vector3 dir)>();
-        var centerline = new List<Vector3> { cursor };
-        var corners = new List<(Vector3 entry, Vector3 dir, Vector3 exit, int turn)>();
-        int finishWaypoint = 0, supportCount = 0, straightRun = 0;
-        float maxHeight = 0f;
-
-        for (int i = 0; i < Layout.Length; i++)
-        {
-            string token = Layout[i];
-            string kind = token.Substring(0, 2);
-            char suffix = token.Length > 2 ? token[2] : ' ';
-            int turn = kind[0] == 'C' && kind != "CV" ? (suffix == 'R' ? 1 : -1) : 0;
-            int shift = kind == "CV" ? (suffix == '+' ? 1 : -1) : 0;
-            int climb = kind == "HU" ? 1 : kind == "HD" ? -1 : 0;
-            string pieceKey = kind == "HU" || kind == "HD" ? "HL" : kind;
-
-            Vector3 entry = cursor, entryDir = heading;
-            GameObject go = PlacePiece(pieces[pieceKey], turn, shift, climb, tileScale, ref cursor, ref heading, trackPieces, $"{i:00}_{token}");
-            pieceBounds.Add(RendererBounds(go));
-            joints.Add((cursor, heading));
-            maxHeight = Mathf.Max(maxHeight, cursor.y);
-
-            if (turn != 0)
-            {
-                AddArc(centerline, entry, entryDir, cursor, turn, 6);
-                corners.Add((entry, entryDir, cursor, turn));
-            }
-            if (shift != 0) AddCurve(centerline, entry, entryDir, cursor, 4);
-            centerline.Add(cursor);
-
-            if (i == FinishAfterPiece)
-            {
-                finish = (cursor, heading);
-                finishWaypoint = centerline.Count - 1;
-            }
-            if (i < 5 && kind == "ST") straightCenters.Add(((entry + cursor) * 0.5f, heading));
-
-            // Checkpoints after every corner/curve and every third straight-ish piece.
-            straightRun = turn != 0 || shift != 0 ? 0 : straightRun + 1;
-            if (turn != 0 || shift != 0 || straightRun % 3 == 0) checkpointCandidates.Add((i, cursor, heading));
-
-            // Supports under elevated joints.
-            if (cursor.y > 0.5f)
-            {
-                PlaceSupport(supportPrefab, supports, cursor, heading, tileScale);
-                supportCount++;
-            }
-        }
-
-        BuildTrackCollision(trackPieces, joints, log);
-
-        float closureError = Vector3.Distance(cursor, startCursor);
-        float headingError = Vector3.Angle(heading, startHeading);
-        log.AppendLine($"pieces placed={Layout.Length}, loop closure error={closureError:F4} m, heading error={headingError:F2} deg, " +
-                       $"max elevation={maxHeight:F1} m, supports={supportCount}");
-        if (closureError > 0.05f || headingError > 0.5f) Debug.LogWarning(Tag + "Track loop does not close cleanly!");
-
-        Bounds trackBounds = pieceBounds[0];
-        foreach (var b in pieceBounds) trackBounds.Encapsulate(b);
-        log.AppendLine($"track bounds center={trackBounds.center:F1} size={trackBounds.size:F1}");
-
-        // Checkpoints in race order starting right after the finish line.
-        int n = Layout.Length;
-        var checkpointPoses = checkpointCandidates
-            .Where(c => c.piece != FinishAfterPiece)
-            .OrderBy(c => (c.piece - FinishAfterPiece - 1 + n) % n)
-            .Select(c => (c.pos, c.dir)).ToList();
-
-        // ---- Ground and perimeter walls -------------------------------------------
-        Material groundMat = SaveMaterial("Ground", new Color(0.38f, 0.62f, 0.32f));
-        Material wallMat = SaveMaterial("Wall", new Color(0.75f, 0.75f, 0.78f));
-        float margin = 45f;
-        Vector3 groundSize = new Vector3(trackBounds.size.x + margin * 2f, 1f, trackBounds.size.z + margin * 2f);
-        var ground = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        ground.name = "Ground";
-        ground.transform.SetParent(root);
-        ground.transform.position = new Vector3(trackBounds.center.x, -0.5f - 0.03f, trackBounds.center.z);
-        ground.transform.localScale = groundSize;
-        ground.GetComponent<Renderer>().sharedMaterial = groundMat;
-
-        var walls = new GameObject("Walls").transform;
-        walls.SetParent(root);
-        float wallH = 3f, wallT = 1f;
-        Vector3 gc = new Vector3(trackBounds.center.x, wallH * 0.5f, trackBounds.center.z);
-        CreateWall(walls, wallMat, gc + Vector3.forward * groundSize.z * 0.5f, new Vector3(groundSize.x, wallH, wallT));
-        CreateWall(walls, wallMat, gc - Vector3.forward * groundSize.z * 0.5f, new Vector3(groundSize.x, wallH, wallT));
-        CreateWall(walls, wallMat, gc + Vector3.right * groundSize.x * 0.5f, new Vector3(wallT, wallH, groundSize.z));
-        CreateWall(walls, wallMat, gc - Vector3.right * groundSize.x * 0.5f, new Vector3(wallT, wallH, groundSize.z));
-
-        // ---- Checkpoints + finish line ----------------------------------------------
-        var cpRoot = new GameObject("Checkpoints").transform;
-        cpRoot.SetParent(root);
-        for (int i = 0; i < checkpointPoses.Count; i++)
-            CreateTrigger($"Checkpoint_{i}", checkpointPoses[i].pos, checkpointPoses[i].dir, i, false, cpRoot);
-        CreateTrigger("FinishLine", finish.pos, finish.dir, -1, true, cpRoot);
-        log.AppendLine($"checkpoints={checkpointPoses.Count}, finish at {finish.pos:F1} heading {finish.dir:F0}");
-
-        // ---- Centerline waypoints (index 0 = finish line) ----------------------------------------
-        centerline.RemoveAt(centerline.Count - 1); // closed loop: last point == first
-        var waypoints = new Vector3[centerline.Count];
-        for (int i = 0; i < centerline.Count; i++) waypoints[i] = centerline[(finishWaypoint + i) % centerline.Count];
-        var raceTrack = root.gameObject.AddComponent<RaceTrack>();
-        raceTrack.Configure(waypoints, RoadWidth);
-        log.AppendLine($"waypoints={waypoints.Length}, centerline length={raceTrack.Length:F1} m, waypoint[0]={waypoints[0]:F1} (finish line)");
-
-        // ---- Staggered 2-wide starting grid behind the finish line -------------------------------
-        Vector3 finishRight = Vector3.Cross(Vector3.up, finish.dir);
-        var gridRoot = new GameObject("Grid").transform;
-        gridRoot.SetParent(root);
-        var gridSlots = new Transform[KartCount];
-        for (int k = 0; k < KartCount; k++)
-        {
-            int row = k / 2, col = k % 2;
-            float back = 7f + row * 7f + col * 3.5f;
-            Vector3 p = finish.pos - finish.dir * back + finishRight * (col == 0 ? -2.3f : 2.3f);
-            Physics.SyncTransforms();
-            if (Physics.Raycast(p + Vector3.up * 5f, Vector3.down, out RaycastHit surface, 20f, ~0, QueryTriggerInteraction.Ignore))
-                p.y = surface.point.y;
-            p += Vector3.up * 0.3f;
-            var slot = new GameObject($"GridSlot_{k}").transform;
-            slot.SetParent(gridRoot);
-            slot.SetPositionAndRotation(p, Quaternion.LookRotation(finish.dir));
-            gridSlots[k] = slot;
-        }
-        Physics.SyncTransforms();
-        int gridOnRoad = 0;
-        foreach (var slot in gridSlots)
-        {
-            if (Physics.Raycast(slot.position + Vector3.up * 3f, Vector3.down, out RaycastHit gh, 10f, ~0, QueryTriggerInteraction.Ignore))
-            {
-                var ts = gh.collider.GetComponent<TrackSurface>();
-                if (ts != null && ts.IsDrivable(gh.triangleIndex)) gridOnRoad++;
-            }
-        }
-        log.AppendLine($"grid slots={KartCount}, on road={gridOnRoad}, first={gridSlots[0].position:F1}, last={gridSlots[KartCount - 1].position:F1}");
-        if (gridOnRoad != KartCount) Debug.LogWarning(Tag + "Some grid slots are not on the road!");
-
-        // ---- Characters and karts ------------------------------------------------------------------
-        CharacterRoster roster = BuildRoster(log);
-        var kartsRoot = new GameObject("Karts").transform;
-        var karts = new KartController[KartCount];
-        for (int k = 0; k < KartCount; k++)
-        {
-            karts[k] = BuildKartShell($"Kart_{k}", kartsRoot, checkpointPoses.Count);
-            karts[k].transform.SetPositionAndRotation(gridSlots[k].position, gridSlots[k].rotation);
-            roster.ApplyTo(karts[k], k % roster.Count); // lobby placeholder, replaced at race start
-        }
-
-        // ---- Cameras, audio listener, race manager ---------------------------------------------------
-        var overviewGo = GameObject.Find("Main Camera");
-        if (overviewGo == null) overviewGo = new GameObject("Main Camera", typeof(Camera));
-        overviewGo.name = "OverviewCamera";
-        overviewGo.tag = "MainCamera";
-        var oldListener = overviewGo.GetComponent<AudioListener>();
-        if (oldListener != null) Object.DestroyImmediate(oldListener);
-        var overview = overviewGo.GetComponent<Camera>();
-        overview.fieldOfView = 50f;
-        overview.farClipPlane = 2000f;
-        float span = Mathf.Max(trackBounds.size.x, trackBounds.size.z);
-        overviewGo.transform.position = trackBounds.center + new Vector3(0f, span * 1.05f, -span * 0.75f);
-        overviewGo.transform.LookAt(trackBounds.center);
-
-        var listener = new GameObject("AudioListener", typeof(AudioListener)).transform;
-        listener.SetParent(overviewGo.transform, false);
-
-        var playerCameras = new Camera[RaceManager.MaxHumans];
-        for (int i = 0; i < playerCameras.Length; i++)
-        {
-            var camGo = new GameObject($"PlayerCamera_{i}", typeof(Camera), typeof(FollowCamera));
-            playerCameras[i] = camGo.GetComponent<Camera>();
-            playerCameras[i].fieldOfView = 65f;
-            playerCameras[i].farClipPlane = 1500f;
-            camGo.GetComponent<FollowCamera>().SetTarget(karts[i].transform);
-            camGo.SetActive(false);
-        }
-
-        var managerGo = new GameObject("RaceManager");
-        var keyboard = managerGo.AddComponent<KeyboardKartInput>();
-        var manager = managerGo.AddComponent<RaceManager>();
-        manager.Configure(karts, gridSlots, playerCameras, overview, listener, raceTrack, roster, keyboard, Laps);
-        BuildAudio(managerGo, log);
-        BuildUi(managerGo, log);
-
-        // ---- Items: manager, materials, item box rows ----------------------------------------------
-        BuildItems(root, raceTrack, log);
-
-        // ---- Rescue helper, hazards, render quality --------------------------------------------------
-        BuildRescue(managerGo, log);
-        BuildHazards(root, raceTrack, log);
-        ApplyRenderQuality(log);
-
-        var lightGo = GameObject.Find("Directional Light");
-        if (lightGo != null)
-        {
-            lightGo.transform.rotation = Quaternion.Euler(50f, -35f, 0f);
-            var light = lightGo.GetComponent<Light>();
-            light.intensity = 1.15f;
-            light.shadows = LightShadows.Soft;
-        }
-
-        // ---- Decoration -----------------------------------------------------------------
-        var deco = new GameObject("Decoration").transform;
-        deco.SetParent(root);
-        var obstacles = new List<Bounds>(pieceBounds);
-
-        // Finish gate (toy kit) spanning the road.
-        var gateVerts = PrefabVertices(gatePrefab);
-        Bounds gateB = BoundsOf(gateVerts);
-        bool gateAlongX = gateB.size.x >= gateB.size.z;
-        float gateScale = RoadWidth * 1.15f / (gateAlongX ? gateB.size.x : gateB.size.z);
-        PlaceProp(gatePrefab, deco, gateScale, finish.pos, YawFromTo(gateAlongX ? Vector3.right : Vector3.forward, finishRight), "FinishGate");
-        log.AppendLine($"gate-finish unscaled size={gateB.size:F3}, scale={gateScale:F2}");
-
-        // Checkered flags either side of the line.
-        for (int s = -1; s <= 1; s += 2)
-        {
-            Vector3 p = finish.pos + finishRight * s * (RoadWidth * 0.5f + 3f);
-            PlaceProp(flagPrefab, deco, PropScale * 0.5f, p, YawFromTo(Vector3.forward, -finish.dir), "FlagCheckers");
-        }
-
-        // Grandstands on the outside (left) of the start straight, facing the road.
-        List<Vector3> standVerts = PrefabVertices(standPrefab);
-        Bounds standB = BoundsOf(standVerts);
-        Vector3 standFront = -TallSide(standVerts);
-        Vector3 leftOfStart = -Vector3.Cross(Vector3.up, startHeading);
-        float standDepth = Mathf.Min(standB.size.x, standB.size.z) * PropScale;
-        for (int i = 1; i < straightCenters.Count - 1; i++)
-        {
-            Vector3 p = straightCenters[i].pos + leftOfStart * (RoadWidth * 0.5f + 4f + standDepth * 0.5f);
-            var stand = PlaceProp(standPrefab, deco, PropScale, p, YawFromTo(standFront, -leftOfStart), "GrandStand");
-            var box = stand.AddComponent<BoxCollider>();
-            box.center = standB.center;
-            box.size = standB.size;
-            obstacles.Add(RendererBounds(stand));
-        }
-        log.AppendLine($"grandStand unscaled size={standB.size:F3}, front(local)={standFront:F0}");
-
-        // Trees scattered off the track.
-        var rng = new Random(1234);
-        int trees = 0;
-        Bounds treeArea = new Bounds(trackBounds.center, new Vector3(groundSize.x - 10f, 1f, groundSize.z - 10f));
-        for (int attempt = 0; attempt < 600 && trees < 45; attempt++)
-        {
-            var p = new Vector3(
-                Mathf.Lerp(treeArea.min.x, treeArea.max.x, (float)rng.NextDouble()), 0f,
-                Mathf.Lerp(treeArea.min.z, treeArea.max.z, (float)rng.NextDouble()));
-            if (Overlaps(obstacles, p, 4f)) continue;
-            GameObject prefab = rng.NextDouble() < 0.5 ? treeLargePrefab : treeSmallPrefab;
-            float h = BoundsOf(PrefabVertices(prefab)).size.y;
-            float targetHeight = Mathf.Lerp(6f, 11f, (float)rng.NextDouble());
-            var tree = PlaceProp(prefab, deco, targetHeight / h, p, Quaternion.Euler(0f, (float)rng.NextDouble() * 360f, 0f), "Tree");
-            obstacles.Add(RendererBounds(tree));
-            trees++;
-        }
-        log.AppendLine($"trees placed={trees}");
-
-        // ---- Sanity checks -----------------------------------------------------------------
-        Physics.SyncTransforms();
-        int jointMisses = 0, jointOffroad = 0;
-        foreach (var j in joints)
-        {
-            if (!Physics.Raycast(j.pos + Vector3.up * 5f, Vector3.down, out RaycastHit hit, 10f, ~0, QueryTriggerInteraction.Ignore)) { jointMisses++; continue; }
-            var ts = hit.collider.GetComponent<TrackSurface>();
-            if (ts == null || !ts.IsDrivable(hit.triangleIndex)) jointOffroad++;
-        }
-        log.AppendLine($"centerline joints={joints.Count}, raycast misses={jointMisses}, not-on-road={jointOffroad}");
-
-        // Drop test: let the karts settle under gravity for 2 s and confirm they rest on the road.
-        var prevMode = Physics.simulationMode;
-        Physics.simulationMode = SimulationMode.Script;
-        for (int i = 0; i < 100; i++) Physics.Simulate(0.02f);
-        Physics.simulationMode = prevMode;
-        float maxDrift = 0f, minY = float.MaxValue, maxY = float.MinValue;
-        for (int k = 0; k < KartCount; k++)
-        {
-            Vector3 settled = karts[k].transform.position;
-            Vector3 slotPos = gridSlots[k].position;
-            maxDrift = Mathf.Max(maxDrift, Vector2.Distance(new Vector2(settled.x, settled.z), new Vector2(slotPos.x, slotPos.z)));
-            minY = Mathf.Min(minY, settled.y);
-            maxY = Mathf.Max(maxY, settled.y);
-            var body = karts[k].GetComponent<Rigidbody>();
-            body.linearVelocity = Vector3.zero;
-            body.angularVelocity = Vector3.zero;
-            karts[k].transform.SetPositionAndRotation(gridSlots[k].position, gridSlots[k].rotation);
-        }
-        log.AppendLine($"drop test ({KartCount} karts): settled y in [{minY:F3}, {maxY:F3}], max horizontal drift={maxDrift:F3} m");
-
-        // Phone server + QR encoder self tests (no scene needed).
-        log.Append(RaceSelfTests.ServerSelfTest());
-        log.Append(RaceSelfTests.QrSelfTest("http://192.168.100.123:8080/"));
-
-        int grassSubmeshes = 0, roadSubmeshes = 0;
-        foreach (var mr in trackPieces.GetComponentsInChildren<MeshRenderer>())
-            foreach (var m in mr.sharedMaterials)
-                if (m != null && m.name.ToLowerInvariant().Contains("grass")) grassSubmeshes++; else roadSubmeshes++;
-        log.AppendLine($"track materials: grass submeshes={grassSubmeshes}, other={roadSubmeshes}");
-
-        // ---- Night, venue, toon look ------------------------------------------------------------
-        BuildNightVenue(root, raceTrack, trackBounds, ground, groundSize, corners, log);
-        ConvertSceneToToon(managerGo, log);
-
-        // ---- Save ------------------------------------------------------------------------------
-        EnsureFolder("Assets/Scenes");
-        if (!EditorSceneManager.SaveScene(scene, ScenePath)) throw new Exception("SaveScene failed");
-        EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
-        AssetDatabase.SaveAssets();
-
-        Debug.Log(Tag + "Layout report:\n" + log);
-        Debug.Log(Tag + "DONE. Scene saved to " + ScenePath);
     }
 
     // ============================================================================================
@@ -516,7 +138,7 @@ public static class RaceSceneBuilder
     /// faces are dropped and shared vertices welded, so the road is one continuous surface.
     /// Submesh 0 = road/curbs/walls, submesh 1 = grass (off-road).
     /// </summary>
-    static void BuildTrackCollision(Transform trackPieces, List<(Vector3 pos, Vector3 dir)> joints, StringBuilder log)
+    static void BuildTrackCollision(Transform trackPieces, List<(Vector3 pos, Vector3 dir)> joints, string assetName, StringBuilder log)
     {
         const float planeEps = 0.03f, weld = 0.01f;
         var verts = new List<Vector3>();
@@ -574,7 +196,7 @@ public static class RaceSceneBuilder
             }
         }
 
-        var col = new Mesh { name = "TrackCollision", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+        var col = new Mesh { name = assetName, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
         col.SetVertices(verts);
         col.subMeshCount = 2;
         col.SetTriangles(tris[0], 0);
@@ -582,7 +204,7 @@ public static class RaceSceneBuilder
         col.RecalculateNormals();
         col.RecalculateBounds();
         EnsureFolder(GeneratedDir);
-        string path = GeneratedDir + "/TrackCollision.asset";
+        string path = $"{GeneratedDir}/{assetName}.asset"; // one asset per track
         AssetDatabase.DeleteAsset(path);
         AssetDatabase.CreateAsset(col, path);
 
@@ -629,7 +251,46 @@ public static class RaceSceneBuilder
                 }
                 if (count < 3 || hi - lo > width * 0.15f || yhi - ylo > width * 0.1f) continue;
                 var p = Vector3.zero;
-                p[axis] = face - sign * width * 0.1f;
+                p[axis] = face - sign * 0.2f; // tab depth: 0.2 kit units on wide and narrow pieces
+                p[other] = (lo + hi) * 0.5f;
+                p.y = ylo;
+                var d = Vector3.zero;
+                d[axis] = sign;
+                result.Add(new Opening { pos = p, dir = d });
+            }
+        }
+        return result.ToArray();
+    }
+
+    /// <summary>
+    /// Racing-kit road tiles: the road meets a bounding-box face along one full tile unit (flat, at
+    /// ground level). Returns joint centre (on the face, road bottom) and outward direction.
+    /// </summary>
+    static Opening[] FindTileConnectors(List<Vector3> verts, float unit)
+    {
+        Bounds b = BoundsOf(verts);
+        float eps = unit * 0.002f;
+        var result = new List<Opening>();
+        foreach (int axis in new[] { 0, 2 })
+        {
+            int other = axis == 0 ? 2 : 0;
+            foreach (int sign in new[] { -1, 1 })
+            {
+                float face = sign < 0 ? b.min[axis] : b.max[axis];
+                float lo = float.MaxValue, hi = float.MinValue, ylo = float.MaxValue, yhi = float.MinValue;
+                int count = 0;
+                foreach (var v in verts)
+                {
+                    if (Mathf.Abs(v[axis] - face) > eps) continue;
+                    count++;
+                    lo = Mathf.Min(lo, v[other]);
+                    hi = Mathf.Max(hi, v[other]);
+                    ylo = Mathf.Min(ylo, v.y);
+                    yhi = Mathf.Max(yhi, v.y);
+                }
+                if (count < 6 || Mathf.Abs(hi - lo - unit) > unit * 0.05f || yhi - ylo > unit * 0.1f) continue;
+                var p = Vector3.zero;
+                p[axis] = face;
                 p[other] = (lo + hi) * 0.5f;
                 p.y = ylo;
                 var d = Vector3.zero;
@@ -701,7 +362,7 @@ public static class RaceSceneBuilder
         for (int i = 1; i < segments; i++)
         {
             float a = Mathf.PI * 0.5f * i / segments;
-            points.Add(centre + (-right * Mathf.Cos(a) + entryDir * Mathf.Sin(a)) * radius);
+            points.Add(centre + (-right * Mathf.Cos(a) + entryDir * Mathf.Sin(a)) * radius + Vector3.up * (exit.y - entry.y) * i / segments);
         }
     }
 
@@ -767,7 +428,7 @@ public static class RaceSceneBuilder
 
         var controller = kart.AddComponent<KartController>();
         controller.Configure(visual);
-        kart.AddComponent<LapTracker>().Configure(checkpointCount, Laps);
+        kart.AddComponent<LapTracker>().Configure(checkpointCount, 3); // per track at runtime
         kart.AddComponent<KartItems>();
         kart.AddComponent<KartAudio>();
         return controller;
@@ -1208,7 +869,7 @@ public static class RaceSceneBuilder
         return hit.collider.GetComponent<TrackSurface>() != null;
     }
 
-    static void BuildNightVenue(Transform root, RaceTrack track, Bounds trackBounds, GameObject ground, Vector3 groundSize,
+    static void BuildNightVenue(Transform root, TrackDefinition def, RaceTrack track, GameObject ground, Vector3 groundSize,
         List<(Vector3 entry, Vector3 dir, Vector3 exit, int turn)> corners, StringBuilder log)
     {
         Physics.SyncTransforms();
@@ -1222,29 +883,18 @@ public static class RaceSceneBuilder
             m.SetTexture("_MainTex", sky);
             m.SetFloat("_Exposure", 1f);
         });
-        RenderSettings.skybox = skyMat;
-        var moonGo = GameObject.Find("Directional Light");
-        if (moonGo != null)
-        {
-            moonGo.name = "Moon";
-            moonGo.transform.rotation = Quaternion.Euler(38f, -40f, 0f);
-            var moon = moonGo.GetComponent<Light>();
-            moon.color = new Color(0.55f, 0.66f, 1f);
-            moon.intensity = 0.38f;
-            moon.shadows = LightShadows.Soft;
-            moon.shadowStrength = 0.6f;
-            RenderSettings.sun = moon;
-        }
-        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
-        RenderSettings.ambientSkyColor = new Color(0.25f, 0.29f, 0.46f);
-        RenderSettings.ambientEquatorColor = new Color(0.17f, 0.18f, 0.26f);
-        RenderSettings.ambientGroundColor = new Color(0.07f, 0.075f, 0.09f);
-        RenderSettings.fog = true;
-        RenderSettings.fogMode = FogMode.ExponentialSquared;
-        RenderSettings.fogColor = new Color(0.05f, 0.07f, 0.14f);
-        RenderSettings.fogDensity = 0.0035f;
-        foreach (var cam in Object.FindObjectsByType<Camera>(FindObjectsInactive.Include))
-            cam.allowHDR = true;
+        def.skybox = skyMat;
+        def.sunEuler = new Vector3(38f, -40f, 0f); // moonlight
+        def.sunColor = new Color(0.55f, 0.66f, 1f);
+        def.sunIntensity = 0.38f;
+        def.sunShadowStrength = 0.6f;
+        def.ambientSky = new Color(0.25f, 0.29f, 0.46f);
+        def.ambientEquator = new Color(0.17f, 0.18f, 0.26f);
+        def.ambientGround = new Color(0.07f, 0.075f, 0.09f);
+        def.fog = true;
+        def.fogColor = new Color(0.05f, 0.07f, 0.14f);
+        def.fogDensity = 0.0035f;
+        def.headlights = true;
 
         // ---- Ground: mowed grass --------------------------------------------------------------
         Texture2D grass = SaveTexture("Grass", GrassTexture(), true);
@@ -1362,7 +1012,7 @@ public static class RaceSceneBuilder
         }
 
         // ---- Glow: item boxes, finish gate ------------------------------------------------------
-        foreach (var box in Object.FindObjectsByType<ItemBox>(FindObjectsInactive.Include))
+        foreach (var box in root.GetComponentsInChildren<ItemBox>(true))
             FlatQuad("BoxGlow", box.transform, Surface(box.transform.position) + Vector3.up * 0.04f, Vector3.forward, 5f, 5f, poolMat);
 
         log.AppendLine($"night: sky + moon + trilight ambient + fog; {postCount} light posts, {realLights} real spot lights, {pools} light pools; " +
@@ -1510,6 +1160,8 @@ public static class RaceSceneBuilder
             Sound(Sfx.UiSelect, 0.6f, false, "InterfaceSounds/select_003"),
             Sound(Sfx.UiReady, 0.7f, false, "InterfaceSounds/confirmation_003"),
             Sound(Sfx.UiBack, 0.5f, false, "InterfaceSounds/back_002"),
+            Sound(Sfx.Intro, 0.9f, true, "MusicJingles/jingles_NES00"),
+            Sound(Sfx.Flyover, 0.7f, true, "MusicJingles/jingles_STEEL00"),
         };
         host.AddComponent<AudioManager>().Configure(entries);
         log.AppendLine($"audio: {entries.Length} Kenney sfx entries ({entries.Sum(e => e.clips.Length)} clips) + generated engine/screech/beeps/music");
@@ -1578,7 +1230,7 @@ public static class RaceSceneBuilder
         log.AppendLine($"rescue helper: {pilot.name} (idle clip={(idle != null)}), scale={1.1f / b.size.y:F2}");
     }
 
-    static void BuildHazards(Transform root, RaceTrack track, StringBuilder log)
+    static void BuildNightHazards(Transform root, RaceTrack track, StringBuilder log)
     {
         var parent = new GameObject("Hazards").transform;
         parent.SetParent(root);
@@ -1683,7 +1335,8 @@ public static class RaceSceneBuilder
     // Items
     // ============================================================================================
 
-    static void BuildItems(Transform root, RaceTrack track, StringBuilder log)
+    /// <summary>Shared item manager (bananas, rockets, shields); the track is set when one is activated.</summary>
+    static void BuildItemManager(GameObject host)
     {
         Material rocketMat = SaveMaterial("Rocket", new Color(0.9f, 0.2f, 0.2f));
         rocketMat.EnableKeyword("_EMISSION");
@@ -1698,9 +1351,13 @@ public static class RaceSceneBuilder
         Vector3 bananaOffset = -new Vector3(bb.center.x, bb.min.y, bb.center.z) * bananaScale;
 
         var itemsGo = new GameObject("Items");
-        itemsGo.transform.SetParent(root);
-        itemsGo.AddComponent<ItemManager>().Configure(banana, bananaScale, bananaOffset, rocketMat, shieldMat, explosionMat, trailMat, track);
+        itemsGo.transform.SetParent(host.transform);
+        itemsGo.AddComponent<ItemManager>().Configure(banana, bananaScale, bananaOffset, rocketMat, shieldMat, explosionMat, trailMat, null);
+    }
 
+    /// <summary>Item box rows (4 boxes across the road) on flat straight-ish spots of the track.</summary>
+    static void BuildItemBoxes(Transform root, RaceTrack track, float[] fractions, StringBuilder log)
+    {
         GameObject boxPrefab = Load(ToyKit + "item-box.fbx");
         Bounds xb = BoundsOf(PrefabVertices(boxPrefab));
         float boxScale = 1.4f / xb.size.y;
@@ -1709,14 +1366,14 @@ public static class RaceSceneBuilder
 
         int rows = 0, boxes = 0, onRoad = 0;
         var rowInfo = new StringBuilder();
-        foreach (float fraction in new[] { 0.25f, 0.52f, 0.8f })
+        foreach (float fraction in fractions)
         {
             float s = FindStraight(track, track.Length * fraction);
             Vector3 centre = track.PointAt(s);
             Vector3 right = track.RightAt(s);
             Quaternion rot = Quaternion.LookRotation(track.TangentAt(s));
             int col = 0;
-            foreach (float lateral in new[] { -3.3f, -1.1f, 1.1f, 3.3f })
+            foreach (float lateral in new[] { -0.275f, -0.092f, 0.092f, 0.275f }.Select(f => f * track.RoadWidth))
             {
                 var box = new GameObject($"ItemBox_{rows}_{col++}");
                 box.transform.SetParent(boxesRoot);
@@ -1743,7 +1400,7 @@ public static class RaceSceneBuilder
             rowInfo.Append($" s={s:F0}m@{centre:F0}");
             rows++;
         }
-        log.AppendLine($"item boxes: {boxes} in {rows} rows ({onRoad} over road):{rowInfo}; box scale={boxScale:F2}, banana scale={bananaScale:F2}");
+        log.AppendLine($"item boxes: {boxes} in {rows} rows ({onRoad} over road):{rowInfo}; box scale={boxScale:F2}");
         if (onRoad != boxes) Debug.LogWarning(Tag + "Some item boxes are not over the road!");
     }
 

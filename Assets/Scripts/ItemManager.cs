@@ -24,6 +24,8 @@ public class ItemManager : MonoBehaviour
     public Material ShieldMaterial => shieldMaterial;
     public Material TrailMaterial => trailMaterial;
     public RaceTrack Track => track;
+    /// <summary>The active track changed (track selection in the lobby).</summary>
+    public void SetTrack(RaceTrack raceTrack) => track = raceTrack;
     public IReadOnlyList<RocketProjectile> Rockets => rockets;
     public int AiUses { get; private set; }
     public int UsesOf(ItemType t) => uses.TryGetValue(t, out int n) ? n : 0;

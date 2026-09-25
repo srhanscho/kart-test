@@ -22,8 +22,14 @@ using Object = UnityEngine.Object;
 /// karts; then all karts race 3 laps on autopilot (CPUs using items), results
 /// appear, the phone returns everyone to the lobby, play mode exits and the
 /// server port must be free again.
+/// Milestone 5 additions: the start intro plays and is skipped from the leader phone, the
+/// pre-race flyover plays (and later is skipped), then in the lobby the leader phone switches
+/// track and turns CPU racers off, a second (non-leader) phone joins and is refused track /
+/// pause / quit, the leader pauses (game frozen), restarts, pauses again (quit prompt: no, then
+/// yes -> quit hook), goes back to the lobby; a 2-human race with no CPUs and a solo time trial
+/// both finish with results. Optional: -kartTrack N picks the first race's track (1..4).
 /// </summary>
-public static class RaceSmokeTest
+public static partial class RaceSmokeTest
 {
     const string Tag = "[RaceSmokeTest] ";
     const string ShotDir = "Logs/SmokeShots"; // Temp/ is wiped when the editor exits
@@ -51,6 +57,12 @@ public static class RaceSmokeTest
         EditorSettings.enterPlayModeOptionsEnabled = true;
         EditorSettings.enterPlayModeOptions = EnterPlayModeOptions.DisableDomainReload;
         EditorSceneManager.OpenScene("Assets/Scenes/Race.unity");
+        firstTrack = 0;
+        string[] args = Environment.GetCommandLineArgs();
+        int at = Array.IndexOf(args, "-kartTrack");
+        if (at >= 0 && at + 1 < args.Length && int.TryParse(args[at + 1], out int n)) firstTrack = Mathf.Max(0, n - 1);
+        RaceManager.SkipIntroForTest = false;
+        RaceManager.QuitHandler = () => quitCalls++; // the test process must keep running
         stage = 0;
         stageStart = EditorApplication.timeSinceStartup;
         EditorApplication.update += Tick;
@@ -83,6 +95,7 @@ public static class RaceSmokeTest
     static void TickInternal()
     {
         while (phoneInbox.TryDequeue(out string msg)) phoneLog.AppendLine(msg);
+        phone2?.Pump();
         if (pendingShot != null)
         {
             if (--pendingFrames > 0) return;
@@ -119,24 +132,41 @@ public static class RaceSmokeTest
 
         switch (stage)
         {
-            case 0: // play mode up, lobby ready, server running
+            case 0: // play mode up, lobby ready, server running; the start intro plays
                 if (Elapsed > 90) { Check(false, "timeout waiting for lobby"); Finish(); return; }
                 if (!EditorApplication.isPlaying) return;
                 rm = Object.FindAnyObjectByType<RaceManager>();
                 if (rm == null || rm.Phase != RacePhase.Lobby || !rm.ServerRunning) return;
+                Ui = rm.GetComponent<RaceUi>();
+                if (!introShot)
+                {
+                    if (!rm.IntroActive) { Check(false, "start intro is not playing"); introShot = true; }
+                    else
+                    {
+                        if (rm.IntroTime < 1.7f) return; // letters landed, kart zooming across
+                        Check(Ui.IntroVisible && !Ui.LobbyVisible && AudioManager.Instance.PlayedCount(Sfx.Intro) == 1,
+                            $"start intro playing: logo visible={Ui.IntroVisible}, lobby hidden={!Ui.LobbyVisible}, jingle={AudioManager.Instance.PlayedCount(Sfx.Intro)}");
+                        introShot = true;
+                        StartUiShot("intro_logo.png");
+                        return;
+                    }
+                }
                 serverPort = rm.ServerPort;
                 Check(true, $"lobby up, server on port {serverPort}, url {rm.Url}, QR={(rm.QrTexture != null ? rm.QrTexture.width + "px" : "none")}");
+                if (firstTrack > 0) rm.SelectTrackForTest(Mathf.Min(firstTrack, rm.Tracks.Count - 1));
                 StartPhone(serverPort);
                 phoneOutbox.Enqueue("hello|smoke-phone-1");
+                phoneOutbox.Enqueue("skip"); // any button on the leader's phone skips the intro
                 phoneOutbox.Enqueue("pick|1");
-                Next("phone joined and picked");
+                Next("phone joined, skipped the intro and picked");
                 break;
 
             case 1: // phone joined -> add a READY keyboard player (P2), check the lobby UI, then the phone readies
                 if (Elapsed > 20) { Check(false, "race did not auto-start when all players were ready"); Finish(); return; }
                 if (!keyboardAdded)
                 {
-                    if (rm.Players.Count < 1) return;
+                    if (rm.Players.Count < 1 || rm.IntroActive) return;
+                    Check(rm.IntroTime < rm.IntroSeconds, $"intro skipped by the leader phone after {rm.IntroTime:F1} s of {rm.IntroSeconds:F1} s");
                     rm.AddKeyboardPlayerForTest(true);
                     rm.AddBotPlayerForTest(); // P3, P4: idle READY players so 3P/4P layouts can be checked
                     rm.AddBotPlayerForTest();
@@ -152,6 +182,8 @@ public static class RaceSmokeTest
                         $"lobby UI: built={Ui != null && Ui.Built}, visible={Ui?.LobbyVisible}, filled player cards={Ui?.LobbyCardsFilled}");
                     Check(am != null && am.Music == MusicState.Lobby && am.MusicPlaying,
                         $"lobby music: state={am?.Music}, playing={am?.MusicPlaying}");
+                    Check(rm.ThumbnailsReady && rm.ActiveTrack.Thumbnail != null && Ui.TrackCardText == rm.ActiveTrack.displayName.ToUpperInvariant() && Ui.CpuText.Contains("FILL"),
+                        $"lobby track card '{Ui.TrackCardText}' (thumbnail {(rm.ActiveTrack.Thumbnail != null ? rm.ActiveTrack.Thumbnail.width + "px" : "none")}), '{Ui.CpuText}'");
                     lobbyUiChecked = true;
                     StartUiShot("ui_lobby.png");
                     return;
@@ -171,9 +203,31 @@ public static class RaceSmokeTest
                 Next("countdown");
                 break;
 
-            case 2: // GO -> phone holds throttle
-                if (Elapsed > 10) { Check(false, "countdown never reached GO"); Finish(); return; }
-                if (!countdownChecked && rm.Phase == RacePhase.Countdown && Elapsed > 0.4)
+            case 2: // flyover -> countdown -> GO -> phone holds throttle
+                if (Elapsed > 16) { Check(false, "countdown never reached GO"); Finish(); return; }
+                if (!flyoverShot)
+                {
+                    if (!rm.FlyoverActive) { Check(false, "pre-race flyover did not play"); flyoverShot = true; return; }
+                    if (Elapsed < 1.6) return;
+                    Check(Ui.FlyoverCardVisible && !Ui.HudVisible(0) && phoneLog.ToString().Contains("flyover|1|"),
+                        $"flyover playing: card={Ui.FlyoverCardVisible}, HUD hidden={!Ui.HudVisible(0)}, phones told 'Get ready'={phoneLog.ToString().Contains("flyover|1|")}");
+                    flyoverShot = true;
+                    StartUiShot("flyover.png");
+                    return;
+                }
+                if (rm.FlyoverActive) return;
+                if (flyoverEndedAt < 0)
+                {
+                    flyoverEndedAt = Elapsed;
+                    Check(Elapsed >= rm.FlyoverSeconds - 0.5f && rm.ViewportCount == rm.HumanRacers.Count,
+                        $"flyover ran its full {rm.FlyoverSeconds:F1} s ({Elapsed:F1} s) and handed over to {rm.ViewportCount} chase cameras");
+                }
+                if (!flyoverPhoneChecked && Elapsed > flyoverEndedAt + 0.3)
+                {
+                    flyoverPhoneChecked = true;
+                    Check(phoneLog.ToString().Contains("flyover|0"), "phones told the flyover ended");
+                }
+                if (!countdownChecked && rm.Phase == RacePhase.Countdown && Elapsed > flyoverEndedAt + 0.4)
                 {
                     countdownChecked = true;
                     Check(Ui.CountdownVisible && (Ui.CountdownText == "3" || Ui.CountdownText == "2"),
@@ -237,7 +291,9 @@ public static class RaceSmokeTest
                 float moved = Vector3.Distance(humanStart, rm.HumanRacers[0].Kart.transform.position);
                 Check(moved > 15f, $"phone throttle moved P1 kart {moved:F1} m in 3 s");
                 // Drive P1 into an item box row.
-                var box = Object.FindObjectsByType<ItemBox>().Where(b => b.Available).OrderBy(b => b.name).FirstOrDefault();
+                var box = Object.FindObjectsByType<ItemBox>().Where(b => b.Available).OrderBy(b => b.name)
+                    .FirstOrDefault(b => StraightLeadIn(b.transform.position)); // flat, straight 20 m run-up
+                if (box == null) box = Object.FindObjectsByType<ItemBox>().Where(b => b.Available).OrderBy(b => b.name).FirstOrDefault();
                 Check(box != null, $"item boxes in scene: {Object.FindObjectsByType<ItemBox>().Length}");
                 if (box == null) { Finish(); return; }
                 P1.Items.ResetItems();
@@ -583,14 +639,22 @@ public static class RaceSmokeTest
                 TopDownShot();
                 CheckThumbnails();
                 string log = phoneLog.ToString();
-                foreach (string expect in new[] { "joined|0|", "pick|", "phase|countdown", "count|3", "phase|race", "hud|", "item|roll|1", "buzz|", "result|", "phase|results", "phase|lobby" })
+                foreach (string expect in new[] { "joined|0|", "pick|", "track|", "cpu|3|FILL", "intro|1", "intro|0", "phase|countdown", "flyover|1|", "count|3", "phase|race", "hud|", "item|roll|1", "buzz|", "result|", "phase|results", "phase|lobby" })
                     Check(log.Contains(expect), $"phone received '{expect}'");
-                Next("stopping play mode");
-                StopPhone();
-                EditorApplication.ExitPlaymode();
+                m5Step = 0;
+                m5Start = EditorApplication.timeSinceStartup;
+                Next("milestone 5: track switch, CPU racers off, second phone, pause menu, quit, 2-human race, time trial");
                 break;
 
             case 23:
+                if (!TickM5()) return;
+                Next("stopping play mode");
+                StopPhone();
+                phone2?.Stop();
+                EditorApplication.ExitPlaymode();
+                break;
+
+            case 24:
                 if (EditorApplication.isPlaying) return;
                 if (Elapsed < 1) return;
                 bool free;
@@ -603,6 +667,7 @@ public static class RaceSmokeTest
                 }
                 catch { free = false; }
                 Check(free, $"after leaving play mode port {serverPort} is free (server thread shut down)");
+                Check(Mathf.Approximately(Time.timeScale, 1f) && !AudioListener.pause, $"after play mode: timeScale={Time.timeScale}, audio paused={AudioListener.pause}");
                 Finish();
                 break;
         }
@@ -799,7 +864,7 @@ public static class RaceSmokeTest
         RenderTexture.active = prev;
         return tex;
     }
-    static RaceTrack Track => Object.FindAnyObjectByType<RaceTrack>();
+    static RaceTrack Track => rm.Track;
     static BananaPeel hopBanana;
     static Vector3 hopTangent;
     static bool hopSent, crashSetup, helperShot, turboChecked;
@@ -809,6 +874,20 @@ public static class RaceSmokeTest
     static RaceManager.Racer rescueA, rescueB;
     static volatile bool phoneHop;
     static double phoneHopUntil;
+
+    static bool StraightLeadIn(Vector3 p)
+    {
+        RaceTrack tr = Track;
+        float s = tr.Project(p);
+        float Ground(float d)
+        {
+            Vector3 q = tr.PointAt(s + d) + Vector3.up * 30f;
+            return Physics.Raycast(q, Vector3.down, out RaycastHit h, 60f, ~0, QueryTriggerInteraction.Ignore) ? h.point.y : -100f;
+        }
+        float y0 = Ground(0f);
+        return Vector3.Angle(tr.TangentAt(s - 20f), tr.TangentAt(s + 4f)) < 2f
+               && new[] { -16f, -12f, -8f, -4f }.All(d => Mathf.Abs(Ground(d) - y0) < 0.3f);
+    }
 
     static Vector3 Flat(Vector3 v) => new Vector3(v.x, 0f, v.z);
 
@@ -953,7 +1032,7 @@ public static class RaceSmokeTest
                 break;
             }
         }
-        Check(onRoad == rm.KartCount, $"grid: {onRoad}/{rm.KartCount} karts on road");
+        Check(onRoad == rm.Standings.Count, $"grid: {onRoad}/{rm.Standings.Count} karts on road");
     }
 
     static void DumpStandings()

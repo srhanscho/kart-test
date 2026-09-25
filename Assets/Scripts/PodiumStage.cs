@@ -94,12 +94,59 @@ public class PodiumStage : MonoBehaviour
         }
         cam.enabled = true;
         shownAt = Time.time;
+        UseStageEnvironment();
     }
 
     public void Hide()
     {
         Clear();
         if (cam != null) cam.enabled = false;
+        RestoreEnvironment();
+    }
+
+    // The podium is lit like a night stage whatever the track's sky (a day or sunset sun would
+    // wash the steps out). The track environment comes back when the podium is hidden.
+    bool envSaved;
+    float sunIntensity;
+    Color sunColor, ambSky, ambEquator, ambGround;
+    bool fog;
+
+    void UseStageEnvironment()
+    {
+        if (envSaved) return;
+        envSaved = true;
+        Light sun = RenderSettings.sun;
+        if (sun != null)
+        {
+            sunIntensity = sun.intensity;
+            sunColor = sun.color;
+            sun.intensity = 0.35f;
+            sun.color = new Color(0.6f, 0.68f, 1f);
+        }
+        ambSky = RenderSettings.ambientSkyColor;
+        ambEquator = RenderSettings.ambientEquatorColor;
+        ambGround = RenderSettings.ambientGroundColor;
+        fog = RenderSettings.fog;
+        RenderSettings.ambientSkyColor = new Color(0.25f, 0.29f, 0.46f);
+        RenderSettings.ambientEquatorColor = new Color(0.17f, 0.18f, 0.26f);
+        RenderSettings.ambientGroundColor = new Color(0.07f, 0.075f, 0.09f);
+        RenderSettings.fog = false;
+    }
+
+    void RestoreEnvironment()
+    {
+        if (!envSaved) return;
+        envSaved = false;
+        Light sun = RenderSettings.sun;
+        if (sun != null)
+        {
+            sun.intensity = sunIntensity;
+            sun.color = sunColor;
+        }
+        RenderSettings.ambientSkyColor = ambSky;
+        RenderSettings.ambientEquatorColor = ambEquator;
+        RenderSettings.ambientGroundColor = ambGround;
+        RenderSettings.fog = fog;
     }
 
     void Clear()

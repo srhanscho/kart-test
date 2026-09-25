@@ -6,9 +6,12 @@ using UnityEngine;
 public enum RacePhase { Lobby, Countdown, Racing, Results }
 
 /// <summary>
-/// Couch-race flow: lobby (phones + optional keyboard player, character picks),
-/// countdown, race with split-screen cameras and CPU fill-ins, results.
+/// Couch-race flow: lobby (phones + optional keyboard player, character and track picks),
+/// countdown, race with split-screen cameras and CPU fill-ins, results, and a pause menu.
 /// Owns the phone controller server.
+/// The party LEADER is the connected player with the lowest slot (phone or keyboard). Only the
+/// leader's phone may pick the track, pause (resume / restart / lobby / quit) and quit from the
+/// lobby; the PC keyboard always has these host rights too.
 /// </summary>
 public class RaceManager : MonoBehaviour
 {
@@ -20,12 +23,21 @@ public class RaceManager : MonoBehaviour
         new Color(0.35f, 0.85f, 0.40f), new Color(1.00f, 0.80f, 0.20f)
     };
 
+    /// <summary>Pause menu entries (same order on the TV and the leader's phone).</summary>
+    public static readonly string[] PauseItems = { "RESUME", "RESTART RACE", "BACK TO LOBBY", "QUIT GAME" };
+    public const int PauseResume = 0, PauseRestart = 1, PauseLobby = 2, PauseQuit = 3;
+
+    /// <summary>What "Quit game" does. Replaced by tests so the test process keeps running.</summary>
+    public static System.Action QuitHandler = DefaultQuit;
+
     [SerializeField] KartController[] karts;
     [SerializeField] Transform[] gridSlots;
     [SerializeField] Camera[] playerCameras;
     [SerializeField] Camera overviewCamera;
     [SerializeField] Transform audioListener;
     [SerializeField] RaceTrack track;
+    [SerializeField] TrackDefinition[] tracks;
+    [SerializeField] Light sun;
     [SerializeField] CharacterRoster roster;
     [SerializeField] KeyboardKartInput keyboardInput;
     [SerializeField] int preferredPort = 8080;
@@ -34,6 +46,8 @@ public class RaceManager : MonoBehaviour
     [SerializeField] float resultsDelay = 3f;
     [SerializeField] float lobbyDisconnectGrace = 8f;
     [SerializeField, Range(0f, 0.2f)] float rubberBandStrength = 0.08f;
+    [SerializeField] float introSeconds = 3.8f;
+    [SerializeField] float flyoverSeconds = 4.2f;
 
     public class Player
     {
@@ -94,7 +108,7 @@ public class RaceManager : MonoBehaviour
     public int ServerPort => server?.Port ?? 0;
     public int Laps => laps;
     public int KartCount => karts.Length;
-    public float CountdownRemaining => Phase == RacePhase.Countdown ? Mathf.Max(0f, raceStartTime - Time.time) : 0f;
+    public float CountdownRemaining => Phase != RacePhase.Countdown ? 0f : FlyoverActive ? countdownSeconds : Mathf.Max(0f, raceStartTime - Time.time);
     public float TimeSinceStart => Phase == RacePhase.Racing || Phase == RacePhase.Results ? Time.time - raceStartTime : 0f;
     public Camera PlayerCamera(int index) => playerCameras[index];
     public float PhaseStartTime => phaseTime;
@@ -106,7 +120,43 @@ public class RaceManager : MonoBehaviour
 
     /// <summary>Test/screenshot hook: show only the first n human viewports.</summary>
     public void DebugSetViewports(int n) => SetupCameras(Mathf.Clamp(n, 0, humanRacers.Count));
-    public IReadOnlyList<KartController> AllKarts => karts;
+    /// <summary>Karts taking part (CPU "Off" hides the unused ones during a race).</summary>
+    public IReadOnlyList<KartController> AllKarts => activeKarts;
+    readonly List<KartController> activeKarts = new List<KartController>();
+    /// <summary>Karts in the current race (humans + CPUs); all karts outside a race.</summary>
+    public int RacerCount => racers.Count > 0 ? racers.Count : karts.Length;
+
+    // ---- CPU racers option (leader) -----------------------------------------------------------
+    /// <summary>Lobby setting: number of CPU karts. -1 = fill the grid to 6 karts.</summary>
+    public static readonly int[] CpuOptions = { 0, 2, 4, -1 };
+    int cpuOption = 3;
+    public int CpuOption => cpuOption;
+    public int CpuSetting => CpuOptions[cpuOption];
+    public string CpuLabel => CpuSetting < 0 ? "FILL TO 6" : CpuSetting == 0 ? "OFF" : CpuSetting.ToString();
+
+    public void CycleCpu(int direction)
+    {
+        if (Phase != RacePhase.Lobby) return;
+        cpuOption = (cpuOption + direction + CpuOptions.Length) % CpuOptions.Length;
+        GameAudio.Play(Sfx.UiMove);
+        BroadcastCpu();
+    }
+
+    /// <summary>Test hook: CPU count (0, 2, 4 or -1 = fill).</summary>
+    public void SetCpuForTest(int cpus)
+    {
+        int i = System.Array.IndexOf(CpuOptions, cpus);
+        if (i >= 0 && Phase == RacePhase.Lobby) cpuOption = i;
+        BroadcastCpu();
+    }
+
+    void BroadcastCpu() => Broadcast($"cpu|{cpuOption}|{CpuLabel}");
+
+    int CpuCountFor(int humans)
+    {
+        int free = karts.Length - humans;
+        return CpuSetting < 0 ? free : Mathf.Min(CpuSetting, free);
+    }
 
     /// <summary>Current race position (1 = leader) of a kart; 1 outside a race.</summary>
     public int PositionOf(KartController kart)
@@ -115,18 +165,20 @@ public class RaceManager : MonoBehaviour
         return 1;
     }
 
-    public void Configure(KartController[] kartList, Transform[] grid, Camera[] cameras, Camera overview,
-        Transform listener, RaceTrack raceTrack, CharacterRoster characterRoster, KeyboardKartInput keyboard, int lapCount)
+    public void Configure(KartController[] kartList, Camera[] cameras, Camera overview, Transform listener,
+        CharacterRoster characterRoster, KeyboardKartInput keyboard, TrackDefinition[] trackList, Light sunLight)
     {
         karts = kartList;
-        gridSlots = grid;
         playerCameras = cameras;
         overviewCamera = overview;
         audioListener = listener;
-        track = raceTrack;
         roster = characterRoster;
         keyboardInput = keyboard;
-        laps = lapCount;
+        tracks = trackList;
+        sun = sunLight;
+        track = trackList[0].track;
+        gridSlots = trackList[0].gridSlots;
+        laps = trackList[0].laps;
     }
 
     // ============================================================================================
@@ -135,7 +187,13 @@ public class RaceManager : MonoBehaviour
 
     void OnEnable() => StartServer();
     void OnDisable() => StopServer();
-    void OnApplicationQuit() => StopServer();
+
+    void OnApplicationQuit()
+    {
+        StopServer();
+        Time.timeScale = 1f;
+        AudioListener.pause = false;
+    }
 
     void StartServer()
     {
@@ -177,9 +235,18 @@ public class RaceManager : MonoBehaviour
         foreach (var kart in karts)
         {
             var lap = kart.GetComponent<LapTracker>();
-            lap.Configure(lap.CheckpointCount, laps);
             lap.RaceFinished += OnRacerFinished;
             lap.LapStarted += OnLapStarted;
+        }
+    }
+
+    void OnDestroy()
+    {
+        if (Instance == this) Instance = null;
+        if (Paused)
+        {
+            Time.timeScale = 1f;
+            AudioListener.pause = false;
         }
     }
 
@@ -191,8 +258,151 @@ public class RaceManager : MonoBehaviour
         Podium = new GameObject("PodiumStage").AddComponent<PodiumStage>();
         Podium.transform.SetParent(transform, false);
         Podium.Init();
+        ActivateTrack(0);
         if (server != null) StartCoroutine(Preview.RenderThumbnails((i, png) => server?.SetFile($"/char/{i}.png", "image/png", png)));
+        StartCoroutine(RenderTrackThumbnails());
         EnterLobby();
+        if (!SkipIntroForTest && introSeconds > 0f) BeginIntro();
+    }
+
+    // ============================================================================================
+    // Game start intro (once per session) and pre-race track flyover
+    // ============================================================================================
+
+    /// <summary>Tests that do not care about the intro set this before entering play mode.</summary>
+    public static bool SkipIntroForTest;
+
+    float introStart;
+    public bool IntroActive { get; private set; }
+    /// <summary>Seconds since the intro started (unscaled).</summary>
+    public float IntroTime => Time.unscaledTime - introStart;
+    public float IntroSeconds => introSeconds;
+    public int IntrosPlayed { get; private set; }
+
+    void BeginIntro()
+    {
+        IntroActive = true;
+        IntrosPlayed++;
+        introStart = Time.unscaledTime;
+        GameAudio.Music(MusicState.None);
+        GameAudio.Play(Sfx.Intro);
+        Broadcast("intro|1");
+    }
+
+    /// <summary>Ends the intro (timer, any PC key or any button on the leader's phone).</summary>
+    public void SkipIntro()
+    {
+        if (!IntroActive) return;
+        IntroActive = false;
+        if (ActiveTrack != null) overviewCamera.transform.SetPositionAndRotation(ActiveTrack.overviewPosition, ActiveTrack.overviewRotation);
+        GameAudio.Music(MusicState.Lobby);
+        Broadcast("intro|0");
+    }
+
+    /// <summary>Slow orbit of the lobby track under the logo.</summary>
+    void TickIntro()
+    {
+        if (IntroTime >= introSeconds || (!Application.isBatchMode && Input.anyKeyDown))
+        {
+            SkipIntro();
+            return;
+        }
+        TrackDefinition def = ActiveTrack;
+        if (def == null) return;
+        Bounds b = def.bounds;
+        float span = Mathf.Max(b.size.x, b.size.z);
+        float angle = -30f + IntroTime * 9f;
+        Vector3 offset = Quaternion.Euler(0f, angle, 0f) * new Vector3(0f, span * 0.42f, -span * 0.62f);
+        overviewCamera.transform.SetPositionAndRotation(b.center + offset, Quaternion.LookRotation(b.center - (b.center + offset)));
+    }
+
+    float flyoverStart, flyoverEnd;
+    readonly List<Vector3> flyPositions = new List<Vector3>();
+    readonly List<Quaternion> flyRotations = new List<Quaternion>();
+    public bool FlyoverActive { get; private set; }
+    public float FlyoverSeconds => flyoverSeconds;
+    public int FlyoversPlayed { get; private set; }
+
+    /// <summary>
+    /// Camera path: high over the circuit, over its tightest corner and its highest point (jumps,
+    /// hills), past the finish gate, then down behind the grid where P1's chase camera takes over.
+    /// </summary>
+    void BeginFlyover()
+    {
+        FlyoverActive = true;
+        FlyoversPlayed++;
+        flyoverStart = Time.time;
+        flyoverEnd = Time.time + flyoverSeconds;
+        SetupCameras(0);
+        Preview?.SetActive(false);
+
+        TrackDefinition def = ActiveTrack;
+        Bounds b = def.bounds;
+        float span = Mathf.Max(b.size.x, b.size.z);
+        float tightS = 0f, tightR = float.MaxValue, highS = -1f, highY = 2f;
+        for (float s = 20f; s < track.Length - 20f; s += 5f)
+        {
+            float r = track.RadiusAt(s);
+            if (r < tightR) { tightR = r; tightS = s; }
+            float y = track.PointAt(s).y;
+            if (y > highY) { highY = y; highS = s; }
+        }
+        var highlights = new List<float> { tightS };
+        if (highS > 0f && Mathf.Abs(highS - tightS) > 60f) highlights.Add(highS);
+        highlights.Sort();
+
+        flyPositions.Clear();
+        flyRotations.Clear();
+        void Key(Vector3 pos, Vector3 lookAt)
+        {
+            flyPositions.Add(pos);
+            flyRotations.Add(Quaternion.LookRotation(lookAt - pos));
+        }
+        Key(b.center + new Vector3(-span * 0.35f, span * 0.45f, -span * 0.55f), b.center);
+        foreach (float s in highlights)
+        {
+            Vector3 p = track.PointAt(s);
+            Key(p - track.TangentAt(s) * 30f + track.RightAt(s) * 18f + Vector3.up * 22f, p);
+        }
+        Vector3 finish = track.PointAt(0f), finishDir = track.TangentAt(0f);
+        Key(finish + finishDir * 40f + Vector3.up * 16f, finish);
+        Transform lead = humanRacers.Count > 0 ? humanRacers[0].Kart.transform : karts[0].transform;
+        Key(lead.position - lead.forward * 7.5f + Vector3.up * 3.2f, lead.position + lead.forward * 12f);
+
+        var cam = overviewCamera;
+        cam.rect = new Rect(0f, 0f, 1f, 1f);
+        cam.gameObject.SetActive(true);
+        GameAudio.Play(Sfx.Flyover);
+        Broadcast($"flyover|1|{def.displayName}|{laps}");
+    }
+
+    public void SkipFlyover()
+    {
+        if (!FlyoverActive) return;
+        flyoverEnd = Time.time;
+    }
+
+    void TickFlyover()
+    {
+        float t = Mathf.Clamp01((Time.time - flyoverStart) / Mathf.Max(0.01f, flyoverSeconds));
+        int segments = flyPositions.Count - 1;
+        float f = t * segments;
+        int i = Mathf.Min(segments - 1, (int)f);
+        float u = f - i;
+        float e = u * u * (3f - 2f * u);
+        Vector3 p0 = flyPositions[Mathf.Max(0, i - 1)], p1 = flyPositions[i], p2 = flyPositions[i + 1], p3 = flyPositions[Mathf.Min(segments, i + 2)];
+        Vector3 pos = 0.5f * (2f * p1 + (-p0 + p2) * u + (2f * p0 - 5f * p1 + 4f * p2 - p3) * u * u + (-p0 + 3f * p1 - 3f * p2 + p3) * u * u * u);
+        overviewCamera.transform.SetPositionAndRotation(pos, Quaternion.Slerp(flyRotations[i], flyRotations[i + 1], e));
+    }
+
+    void EndFlyover()
+    {
+        FlyoverActive = false;
+        raceStartTime = Time.time + countdownSeconds - 0.001f; // full 3-2-1 after the flyover (the epsilon keeps float error from showing a "4")
+        lastCountValue = -1;
+        if (ActiveTrack != null) overviewCamera.transform.SetPositionAndRotation(ActiveTrack.overviewPosition, ActiveTrack.overviewRotation);
+        SetupCameras(humanRacers.Count);
+        Broadcast("flyover|0");
     }
 
     void Update()
@@ -200,11 +410,18 @@ public class RaceManager : MonoBehaviour
         PumpServer();
         HandleKeyboard();
 
+        if (Paused)
+        {
+            SendPhoneItems();
+            return;
+        }
+
         switch (Phase)
         {
             case RacePhase.Lobby:
                 DropLostPlayers();
-                if (players.Count > 0 && players.All(p => p.Ready)) StartCountdown();
+                if (IntroActive) TickIntro();
+                else if (players.Count > 0 && players.All(p => p.Ready)) StartCountdown();
                 break;
             case RacePhase.Countdown:
                 TickCountdown();
@@ -230,21 +447,153 @@ public class RaceManager : MonoBehaviour
     }
 
     // ============================================================================================
+    // Tracks
+    // ============================================================================================
+
+    int selectedTrack;     // 0..Tracks.Count-1, or Tracks.Count = RANDOM
+    int activeTrack = -1;  // the track that is enabled in the scene
+
+    public IReadOnlyList<TrackDefinition> Tracks => tracks;
+    /// <summary>Lobby card: 0..Tracks.Count-1, Tracks.Count = RANDOM.</summary>
+    public int SelectedTrack => selectedTrack;
+    public bool RandomSelected => selectedTrack >= tracks.Length;
+    public int ActiveTrackIndex => activeTrack;
+    public TrackDefinition ActiveTrack => activeTrack >= 0 ? tracks[activeTrack] : null;
+    public bool ThumbnailsReady { get; private set; }
+    public string TrackCardName(int index) => index >= tracks.Length ? "RANDOM" : tracks[index].displayName;
+
+    /// <summary>Enables one track (all others off), applies its sky/lighting and points the race logic at it.</summary>
+    void ActivateTrack(int index)
+    {
+        index = Mathf.Clamp(index, 0, tracks.Length - 1);
+        for (int i = 0; i < tracks.Length; i++)
+            if (tracks[i].gameObject.activeSelf != (i == index)) tracks[i].gameObject.SetActive(i == index);
+        activeTrack = index;
+        TrackDefinition def = tracks[index];
+        def.ApplyEnvironment(sun);
+        DynamicGI.UpdateEnvironment();
+        track = def.track;
+        gridSlots = def.gridSlots;
+        laps = def.laps;
+        foreach (var kart in karts) kart.GetComponent<LapTracker>().Configure(def.checkpointCount, laps);
+        ItemManager.Instance?.SetTrack(track);
+        overviewCamera.transform.SetPositionAndRotation(def.overviewPosition, def.overviewRotation);
+        Physics.SyncTransforms();
+    }
+
+    /// <summary>Leader phone / keyboard: next or previous track card (the last card is RANDOM).</summary>
+    public void CycleTrack(int direction)
+    {
+        if (Phase != RacePhase.Lobby) return;
+        int n = tracks.Length + 1;
+        selectedTrack = ((selectedTrack + direction) % n + n) % n;
+        if (!RandomSelected) ShowTrackInLobby(selectedTrack);
+        GameAudio.Play(Sfx.UiMove);
+        SendTrackToAll();
+    }
+
+    /// <summary>Test hook: select a track card directly (index == Tracks.Count selects RANDOM).</summary>
+    public void SelectTrackForTest(int index)
+    {
+        if (Phase != RacePhase.Lobby) return;
+        selectedTrack = Mathf.Clamp(index, 0, tracks.Length);
+        if (!RandomSelected) ShowTrackInLobby(selectedTrack);
+        SendTrackToAll();
+    }
+
+    void ShowTrackInLobby(int index)
+    {
+        if (index == activeTrack) return;
+        ActivateTrack(index);
+        for (int k = 0; k < karts.Length; k++) karts[k].Teleport(gridSlots[k].position, gridSlots[k].rotation);
+    }
+
+    /// <summary>Renders a top-down picture of every track (lobby card and phone image).</summary>
+    System.Collections.IEnumerator RenderTrackThumbnails()
+    {
+        yield return null;
+        if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null) yield break;
+        var camGo = new GameObject("TrackThumbCamera");
+        var cam = camGo.AddComponent<Camera>();
+        cam.enabled = false;
+        cam.orthographic = true;
+        cam.clearFlags = CameraClearFlags.Skybox;
+        cam.allowHDR = false;
+        const int w = 480, h = 300;
+        var rt = new RenderTexture(w, h, 24, RenderTextureFormat.ARGB32) { antiAliasing = 4 };
+        cam.targetTexture = rt;
+        int keep = activeTrack;
+        for (int i = 0; i < tracks.Length; i++)
+        {
+            ActivateTrack(i);
+            Bounds b = tracks[i].bounds;
+            cam.transform.SetPositionAndRotation(b.center + Vector3.up * 400f, Quaternion.Euler(90f, 0f, 0f));
+            cam.orthographicSize = Mathf.Max(b.extents.z, b.extents.x * h / w) * 1.08f;
+            cam.farClipPlane = 1000f;
+            bool fog = RenderSettings.fog;
+            RenderSettings.fog = false; // straight down through 400 m of fog would grey everything out
+            cam.Render();
+            RenderSettings.fog = fog;
+            var prev = RenderTexture.active;
+            RenderTexture.active = rt;
+            var tex = new Texture2D(w, h, TextureFormat.RGB24, false) { name = "TrackThumb_" + i };
+            tex.ReadPixels(new Rect(0, 0, w, h), 0, 0, false);
+            tex.Apply();
+            RenderTexture.active = prev;
+            tracks[i].Thumbnail = tex;
+            server?.SetFile($"/track/{i}.png", "image/png", tex.EncodeToPNG());
+        }
+        ActivateTrack(keep);
+        if (Phase == RacePhase.Lobby)
+            for (int k = 0; k < karts.Length; k++) karts[k].Teleport(gridSlots[k].position, gridSlots[k].rotation);
+        cam.targetTexture = null;
+        rt.Release();
+        Destroy(camGo);
+        ThumbnailsReady = true;
+        SendTrackToAll();
+    }
+
+    void SendTrackToAll()
+    {
+        if (server == null) return;
+        foreach (var p in players) SendTrack(p);
+    }
+
+    /// <summary>track|card|cards|name|length m|difficulty|laps (the last card is RANDOM: no picture).</summary>
+    void SendTrack(Player p)
+    {
+        if (server == null || p.IsKeyboard || p.ConnectionId < 0) return;
+        int n = tracks.Length + 1;
+        if (RandomSelected) server.Send(p.ConnectionId, $"track|{selectedTrack}|{n}|RANDOM|0|0|0");
+        else
+        {
+            TrackDefinition t = tracks[selectedTrack];
+            server.Send(p.ConnectionId, $"track|{selectedTrack}|{n}|{t.displayName}|{t.Length:F0}|{t.difficulty}|{t.laps}");
+        }
+    }
+
+    // ============================================================================================
     // Phases
     // ============================================================================================
 
     public void EnterLobby()
     {
+        if (Paused) SetPaused(false, null);
         Phase = RacePhase.Lobby;
         phaseTime = Time.time;
         resultsAt = -1f;
         humanRacers.Clear();
         standings.Clear();
+        LobbyQuitConfirm = false;
         foreach (var p in players) p.Ready = false;
 
+        racers.Clear();
+        activeKarts.Clear();
         for (int k = 0; k < karts.Length; k++)
         {
             KartController kart = karts[k];
+            kart.gameObject.SetActive(true);
+            activeKarts.Add(kart);
             kart.SetInput(null);
             kart.SetControlsLocked(true);
             kart.SpeedMultiplier = 1f;
@@ -258,16 +607,29 @@ public class RaceManager : MonoBehaviour
         Podium?.Hide();
         GameAudio.Music(MusicState.Lobby);
         Broadcast("phase|lobby");
-        foreach (var p in players) SendPick(p);
+        foreach (var p in players)
+        {
+            SendPick(p);
+            SendTrack(p);
+        }
+        BroadcastCpu();
         foreach (var w in waitingConnections.ToList()) Hello(w.Key, w.Value);
     }
 
     /// <summary>Starts the countdown with the current players (host / keyboard "force start").</summary>
-    public void StartCountdown()
+    public void StartCountdown() => StartRace(false);
+
+    /// <summary>
+    /// Countdown on the active track. A restart keeps the track and every character (CPUs too);
+    /// a new race resolves a RANDOM track card first.
+    /// </summary>
+    void StartRace(bool restart)
     {
         if (Phase != RacePhase.Lobby) return;
         if (players.Count == 0) AddKeyboardPlayer();
+        if (!restart && RandomSelected) ActivateTrack(rng.Next(tracks.Length));
 
+        var previousCpu = restart ? racers.Where(r => r.Human == null).Select(r => r.Character).ToList() : new List<int>();
         racers.Clear();
         humanRacers.Clear();
         finishCount = 0;
@@ -277,9 +639,17 @@ public class RaceManager : MonoBehaviour
         List<Player> humans = players.OrderBy(p => p.Slot).ToList();
         var freeCharacters = Enumerable.Range(0, roster.Count).Where(c => humans.All(h => h.Character != c))
             .OrderBy(_ => rng.Next()).ToList();
+        if (previousCpu.Count > 0 && previousCpu.All(c => humans.All(h => h.Character != c))) freeCharacters = previousCpu;
 
+        bool headlights = ActiveTrack != null && ActiveTrack.headlights;
+        int racing = humans.Count + CpuCountFor(humans.Count);
+        activeKarts.Clear();
         for (int k = 0; k < karts.Length; k++)
         {
+            bool inRace = k < racing;
+            karts[k].gameObject.SetActive(inRace);
+            if (!inRace) continue;
+            activeKarts.Add(karts[k]);
             var r = new Racer { KartIndex = k, Kart = karts[k], Lap = karts[k].GetComponent<LapTracker>(), Items = karts[k].GetComponent<KartItems>() };
             if (k < humans.Count)
             {
@@ -314,7 +684,7 @@ public class RaceManager : MonoBehaviour
             var audio = r.Kart.GetComponent<KartAudio>();
             if (audio != null) audio.Human = r.Human != null;
             var beam = r.Kart.transform.Find("HeadlightBeam");
-            if (beam != null) beam.GetComponent<Light>().enabled = r.Human != null; // real lights only for humans
+            if (beam != null) beam.GetComponent<Light>().enabled = headlights && r.Human != null; // real lights only for humans at night
         }
 
         // Grid: CPUs on the front rows, humans behind them.
@@ -324,17 +694,29 @@ public class RaceManager : MonoBehaviour
 
         SetupCameras(humanRacers.Count);
         Preview?.SetActive(false);
+        Podium?.Hide();
 
         Phase = RacePhase.Countdown;
         phaseTime = Time.time;
         raceStartTime = Time.time + countdownSeconds;
         lastCountValue = -1;
+        FlyoverActive = false;
         Broadcast("phase|countdown");
+        if (!restart && flyoverSeconds > 0f) BeginFlyover();
         UpdateStandings();
     }
 
     void TickCountdown()
     {
+        if (FlyoverActive)
+        {
+            if (Time.time >= flyoverEnd) EndFlyover();
+            else
+            {
+                TickFlyover();
+                return;
+            }
+        }
         float remaining = raceStartTime - Time.time;
         int value = Mathf.CeilToInt(remaining);
         if (value != lastCountValue && value > 0)
@@ -400,6 +782,165 @@ public class RaceManager : MonoBehaviour
             if (h.Human != null && !h.Human.IsKeyboard)
                 server?.Send(h.Human.ConnectionId, $"result|You finished {Ordinal(h.Position)}!");
         Broadcast("phase|results");
+    }
+
+    // ============================================================================================
+    // Pause menu (leader only) and quitting
+    // ============================================================================================
+
+    float timeScaleBeforePause = 1f;
+
+    public bool Paused { get; private set; }
+    /// <summary>"P1" (phone leader) or "HOST" (PC keyboard without a keyboard player).</summary>
+    public string PausedBy { get; private set; }
+    public int PauseSelection { get; private set; }
+    /// <summary>Pause menu is asking "Quit game?" (selection 0 = NO, 1 = YES).</summary>
+    public bool PauseQuitConfirm { get; private set; }
+    public int ConfirmSelection { get; private set; }
+    /// <summary>Lobby "Quit game?" prompt opened with Esc on the PC.</summary>
+    public bool LobbyQuitConfirm { get; private set; }
+    public int QuitRequests { get; private set; }
+    public int PauseDenied { get; private set; }
+    public bool CanPause => Phase == RacePhase.Countdown || Phase == RacePhase.Racing || Phase == RacePhase.Results;
+
+    /// <summary>Lowest connected slot (phone or keyboard player).</summary>
+    public Player Leader => players.Where(p => p.Connected).OrderBy(p => p.Slot).FirstOrDefault();
+    bool IsLeader(Player p) => p != null && p == Leader;
+
+    void SetPaused(bool paused, string by)
+    {
+        if (paused == Paused) return;
+        Paused = paused;
+        if (paused)
+        {
+            timeScaleBeforePause = Time.timeScale > 0f ? Time.timeScale : 1f;
+            Time.timeScale = 0f;
+            PausedBy = by;
+            PauseSelection = 0;
+            PauseQuitConfirm = false;
+            foreach (var p in players) p.Input.Clear();
+        }
+        else
+        {
+            Time.timeScale = timeScaleBeforePause;
+            PauseQuitConfirm = false;
+        }
+        AudioManager.Instance?.SetPaused(paused);
+        GameAudio.Play(paused ? Sfx.UiSelect : Sfx.UiBack);
+        BroadcastPause();
+    }
+
+    void BroadcastPause()
+    {
+        if (server == null) return;
+        if (!Paused)
+        {
+            Broadcast("pause|0");
+            return;
+        }
+        Player leader = Leader;
+        foreach (var p in players)
+        {
+            if (p.IsKeyboard || p.ConnectionId < 0) continue;
+            server.Send(p.ConnectionId, $"pause|1|{PausedBy}|{(p == leader ? 1 : 0)}|{PauseSelection}|{(PauseQuitConfirm ? 1 : 0)}|{ConfirmSelection}");
+        }
+    }
+
+    /// <summary>Pause request from a phone (null = PC keyboard). Only the leader may pause.</summary>
+    public bool RequestPause(Player from)
+    {
+        if (!CanPause || Paused) return false;
+        if (from != null && !from.IsKeyboard && !IsLeader(from))
+        {
+            PauseDenied++;
+            if (from.ConnectionId >= 0) server?.Send(from.ConnectionId, "denied|pause");
+            return false;
+        }
+        Player kb = players.FirstOrDefault(p => p.IsKeyboard);
+        string by = from != null ? from.Label : kb != null ? kb.Label : "HOST";
+        SetPaused(true, by);
+        return true;
+    }
+
+    /// <summary>Menu navigation: -1 up, +1 down.</summary>
+    public void PauseMove(int direction)
+    {
+        if (!Paused) return;
+        if (PauseQuitConfirm) ConfirmSelection = direction > 0 ? 1 : 0;
+        else PauseSelection = (PauseSelection + direction + PauseItems.Length) % PauseItems.Length;
+        GameAudio.Play(Sfx.UiMove);
+        BroadcastPause();
+    }
+
+    public void PauseSelect(int item = -1)
+    {
+        if (!Paused) return;
+        if (PauseQuitConfirm)
+        {
+            if (item >= 0) ConfirmSelection = Mathf.Clamp(item, 0, 1);
+            if (ConfirmSelection == 1) Quit();
+            else PauseBack();
+            return;
+        }
+        if (item >= 0) PauseSelection = Mathf.Clamp(item, 0, PauseItems.Length - 1);
+        switch (PauseSelection)
+        {
+            case PauseResume:
+                SetPaused(false, null);
+                break;
+            case PauseRestart:
+                RestartRace();
+                break;
+            case PauseLobby:
+                SetPaused(false, null);
+                EnterLobby();
+                break;
+            case PauseQuit:
+                PauseQuitConfirm = true;
+                ConfirmSelection = 0; // NO first: quitting always needs a deliberate second choice
+                GameAudio.Play(Sfx.UiSelect);
+                BroadcastPause();
+                break;
+        }
+    }
+
+    /// <summary>Back / Esc inside the menu: leaves the quit prompt, otherwise resumes.</summary>
+    public void PauseBack()
+    {
+        if (!Paused) return;
+        if (PauseQuitConfirm)
+        {
+            PauseQuitConfirm = false;
+            GameAudio.Play(Sfx.UiBack);
+            BroadcastPause();
+        }
+        else SetPaused(false, null);
+    }
+
+    /// <summary>Same track, same characters, fresh countdown.</summary>
+    public void RestartRace()
+    {
+        if (Phase == RacePhase.Lobby) return;
+        SetPaused(false, null);
+        Podium?.Hide();
+        Phase = RacePhase.Lobby; // StartRace only runs from the lobby state; nothing is broadcast in between
+        StartRace(true);
+    }
+
+    void Quit()
+    {
+        QuitRequests++;
+        Debug.Log("[RaceManager] quit requested by the leader");
+        QuitHandler?.Invoke();
+    }
+
+    static void DefaultQuit()
+    {
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#else
+        Application.Quit();
+#endif
     }
 
     // ============================================================================================
@@ -560,9 +1101,10 @@ public class RaceManager : MonoBehaviour
                         if (lost.ConnectionId == e.ConnectionId)
                         {
                             lost.ConnectionId = -1;
-                            lost.LostAt = Time.time;
+                            lost.LostAt = Time.unscaledTime;
                             lost.Input.Clear();
                             SendJoinedToAll();
+                            if (Paused) BroadcastPause(); // leadership may have moved
                         }
                     }
                     break;
@@ -584,8 +1126,9 @@ public class RaceManager : MonoBehaviour
                 if (parts.Length >= 2) Hello(conn, parts[1]);
                 break;
             case "s":
-                if (player != null && parts.Length >= 4)
-                    player.Input.Apply(ParseFloat(parts[1]), ParseFloat(parts[2]), parts[3] == "1", parts.Length >= 5 && parts[4] == "1");
+                if (player == null || parts.Length < 4) break;
+                if (Paused) player.Input.Clear(); // inputs are ignored while paused
+                else player.Input.Apply(ParseFloat(parts[1]), ParseFloat(parts[2]), parts[3] == "1", parts.Length >= 5 && parts[4] == "1");
                 break;
             case "pick":
                 if (player != null && parts.Length >= 2 && Phase == RacePhase.Lobby && !player.Ready)
@@ -600,11 +1143,52 @@ public class RaceManager : MonoBehaviour
                 }
                 break;
             case "start":
-                if (player != null && IsHost(player))
+                if (player != null && IsLeader(player) && !Paused)
                 {
                     if (Phase == RacePhase.Lobby) StartCountdown();
                     else if (Phase == RacePhase.Results) EnterLobby();
                 }
+                break;
+            case "track":
+                if (player != null && parts.Length >= 2 && Phase == RacePhase.Lobby)
+                {
+                    if (IsLeader(player)) CycleTrack(parts[1] == "-1" ? -1 : 1);
+                    else server?.Send(conn, "denied|track");
+                }
+                break;
+            case "cpu":
+                if (player != null && parts.Length >= 2 && Phase == RacePhase.Lobby)
+                {
+                    if (IsLeader(player)) CycleCpu(parts[1] == "-1" ? -1 : 1);
+                    else server?.Send(conn, "denied|cpu");
+                }
+                break;
+            case "pause":
+                if (player != null) RequestPause(player);
+                break;
+            case "menu":
+                if (player == null || !Paused || parts.Length < 2) break;
+                if (!IsLeader(player)) { server?.Send(conn, "denied|menu"); break; }
+                switch (parts[1])
+                {
+                    case "up": PauseMove(-1); break;
+                    case "down": PauseMove(1); break;
+                    case "ok": PauseSelect(); break;
+                    case "back": PauseBack(); break;
+                    case "pick":
+                        if (parts.Length >= 3 && int.TryParse(parts[2], out int item)) PauseSelect(item);
+                        break;
+                }
+                break;
+            case "skip": // any button on the leader's phone skips the intro / the flyover
+                if (player == null || !IsLeader(player) || Paused) break;
+                if (IntroActive) SkipIntro();
+                else if (FlyoverActive) SkipFlyover();
+                break;
+            case "quit": // lobby EXIT button, confirmed on the phone
+                if (player == null || Phase != RacePhase.Lobby || parts.Length < 2 || parts[1] != "yes") break;
+                if (IsLeader(player)) Quit();
+                else server?.Send(conn, "denied|quit");
                 break;
         }
     }
@@ -619,6 +1203,7 @@ public class RaceManager : MonoBehaviour
                 waitingConnections[conn] = id;
                 server.Send(conn, "wait");
                 server.Send(conn, "phase|" + PhaseName());
+                if (Paused) server.Send(conn, $"pause|1|{PausedBy}|0|0|0|0");
                 return;
             }
             player = CreatePlayer(id, false);
@@ -636,6 +1221,11 @@ public class RaceManager : MonoBehaviour
         SendJoinedToAll();
         server.Send(conn, "phase|" + PhaseName());
         SendPick(player);
+        SendTrack(player);
+        server.Send(conn, $"cpu|{cpuOption}|{CpuLabel}");
+        if (IntroActive) server.Send(conn, "intro|1");
+        if (FlyoverActive) server.Send(conn, $"flyover|1|{ActiveTrack.displayName}|{laps}");
+        if (Paused) BroadcastPause();
     }
 
     Player CreatePlayer(string id, bool keyboard)
@@ -668,6 +1258,25 @@ public class RaceManager : MonoBehaviour
         p.Ready = true;
     }
 
+    /// <summary>Test hook: removes the idle test players (frees their slots).</summary>
+    public void RemoveBotPlayersForTest()
+    {
+        foreach (var p in players.Where(x => x.IsTestBot).ToList()) RemovePlayer(p);
+    }
+
+    /// <summary>Test hook: the keyboard player leaves (like Backspace in the lobby).</summary>
+    public void RemoveKeyboardPlayerForTest()
+    {
+        var kb = players.FirstOrDefault(p => p.IsKeyboard);
+        if (kb != null && Phase == RacePhase.Lobby) RemovePlayer(kb);
+    }
+
+    /// <summary>Test hook: marks the keyboard and bot players READY (phones ready themselves).</summary>
+    public void ReadyLocalPlayersForTest()
+    {
+        foreach (var p in players) if (p.IsKeyboard || p.IsTestBot) p.Ready = true;
+    }
+
     /// <summary>Test hook: add the keyboard player (optionally already READY).</summary>
     public void AddKeyboardPlayerForTest(bool ready)
     {
@@ -688,7 +1297,7 @@ public class RaceManager : MonoBehaviour
         for (int i = players.Count - 1; i >= 0; i--)
         {
             Player p = players[i];
-            if (!p.Connected && Time.time - p.LostAt > lobbyDisconnectGrace) RemovePlayer(p);
+            if (!p.Connected && Time.unscaledTime - p.LostAt > lobbyDisconnectGrace) RemovePlayer(p);
         }
     }
 
@@ -718,12 +1327,7 @@ public class RaceManager : MonoBehaviour
         SendPick(player);
     }
 
-    bool IsHost(Player player)
-    {
-        Player host = players.Where(p => !p.IsKeyboard && p.ConnectionId >= 0).OrderBy(p => p.Slot).FirstOrDefault();
-        return host == player;
-    }
-
+    /// <summary>joined|slot|colour|leader - the leader's phone shows the track arrows, START, PAUSE and EXIT.</summary>
     void SendJoinedToAll()
     {
         if (server == null) return;
@@ -731,7 +1335,7 @@ public class RaceManager : MonoBehaviour
         {
             if (p.IsKeyboard || p.ConnectionId < 0) continue;
             string hex = "#" + ColorUtility.ToHtmlStringRGB(p.Color);
-            server.Send(p.ConnectionId, $"joined|{p.Slot}|{hex}|{(IsHost(p) ? 1 : 0)}");
+            server.Send(p.ConnectionId, $"joined|{p.Slot}|{hex}|{(IsLeader(p) ? 1 : 0)}");
         }
     }
 
@@ -745,15 +1349,54 @@ public class RaceManager : MonoBehaviour
 
     void Broadcast(string text) => server?.Broadcast(text);
 
+    /// <summary>
+    /// PC keys. Lobby: Enter join/ready, Left/Right (A/D) character, Q/E or Tab track, C CPU racers,
+    /// Backspace leave, Space start, Esc quit prompt. Race/results: Esc or P pause menu (Up/Down or W/S, Enter).
+    /// </summary>
     void HandleKeyboard()
     {
         bool enter = Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter);
         bool space = Input.GetKeyDown(KeyCode.Space);
+        bool esc = Input.GetKeyDown(KeyCode.Escape);
         Player kb = players.FirstOrDefault(p => p.IsKeyboard);
+
+        if (Paused)
+        {
+            if (Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W)) PauseMove(-1);
+            if (Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S)) PauseMove(1);
+            if (PauseQuitConfirm && (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A))) PauseMove(-1);
+            if (PauseQuitConfirm && (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D))) PauseMove(1);
+            if (enter || space) PauseSelect();
+            else if (esc || Input.GetKeyDown(KeyCode.P)) PauseBack();
+            return;
+        }
+
+        if (IntroActive) return; // any key skips it (TickIntro)
+        if (FlyoverActive && Input.anyKeyDown && !esc && !Input.GetKeyDown(KeyCode.P))
+        {
+            SkipFlyover();
+            return;
+        }
 
         switch (Phase)
         {
             case RacePhase.Lobby:
+                if (LobbyQuitConfirm)
+                {
+                    if (enter) Quit();
+                    if (esc || Input.GetKeyDown(KeyCode.Backspace))
+                    {
+                        LobbyQuitConfirm = false;
+                        GameAudio.Play(Sfx.UiBack);
+                    }
+                    return;
+                }
+                if (esc)
+                {
+                    LobbyQuitConfirm = true;
+                    GameAudio.Play(Sfx.UiSelect);
+                    return;
+                }
                 if (enter)
                 {
                     if (kb == null) AddKeyboardPlayer();
@@ -768,15 +1411,19 @@ public class RaceManager : MonoBehaviour
                     if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A)) CyclePick(kb, -1);
                     if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D)) CyclePick(kb, 1);
                 }
+                if (Input.GetKeyDown(KeyCode.C)) CycleCpu(1);
+                if (Input.GetKeyDown(KeyCode.Q)) CycleTrack(-1);
+                if (Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.Tab)) CycleTrack(1);
                 if (kb != null && (Input.GetKeyDown(KeyCode.Backspace) || Input.GetKeyDown(KeyCode.Delete))) RemovePlayer(kb);
                 if (space) StartCountdown();
                 break;
             case RacePhase.Countdown:
             case RacePhase.Racing:
-                if (Input.GetKeyDown(KeyCode.Escape)) EnterLobby();
+                if (esc || Input.GetKeyDown(KeyCode.P)) RequestPause(null);
                 break;
             case RacePhase.Results:
-                if (enter || space) EnterLobby();
+                if (esc || Input.GetKeyDown(KeyCode.P)) RequestPause(null);
+                else if (enter || space) EnterLobby();
                 break;
         }
     }

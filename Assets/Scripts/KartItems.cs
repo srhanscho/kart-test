@@ -102,7 +102,7 @@ public class KartItems : MonoBehaviour
             IsRolling = false;
             var rm = RaceManager.Instance;
             int position = rm != null ? rm.PositionOf(kart) : 1;
-            int count = rm != null ? rm.KartCount : 1;
+            int count = rm != null ? rm.RacerCount : 1;
             Held = ItemTable.Roll(position, count, Rng);
             if (Local) GameAudio.Play(Sfx.RouletteDing, null, 0.8f);
         }

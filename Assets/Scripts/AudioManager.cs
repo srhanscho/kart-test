@@ -7,7 +7,7 @@ public enum Sfx
     Hop, Land, ItemBox, RouletteTick, RouletteDing, BananaDrop, BananaSlip, RocketLaunch, Explosion,
     ShieldUp, ShieldBreak, Turbo, MiniTurboReady, MiniTurboRelease, WallCrash, SpinOut, ObstacleHit,
     Rescue, LapComplete, FinalLap, Finish1st, FinishPodium, FinishOther, UiMove, UiSelect, UiReady, UiBack,
-    CountBeep, CountGo
+    CountBeep, CountGo, Intro, Flyover
 }
 
 public enum MusicState { None, Lobby, Race, FinalLap }
@@ -54,6 +54,15 @@ public class AudioManager : MonoBehaviour
     public int PlayedCount(Sfx id) => played.TryGetValue(id, out int n) ? n : 0;
 
     public void Configure(SfxEntry[] sfx) => entries = sfx;
+
+    /// <summary>Pause menu open: everything stops (AudioListener.pause) except menu sounds.</summary>
+    public bool Paused { get; private set; }
+
+    public void SetPaused(bool paused)
+    {
+        Paused = paused;
+        AudioListener.pause = paused;
+    }
 
     void Awake()
     {
@@ -155,6 +164,7 @@ public class AudioManager : MonoBehaviour
             src.maxDistance = 90f;
         }
         else src.spatialBlend = 0f;
+        src.ignoreListenerPause = Paused && !position.HasValue; // menu clicks still play while paused
         src.Play();
         if (e.isJingle) duckUntil = Time.unscaledTime + clip.length + 0.3f;
         return src;
