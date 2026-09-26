@@ -51,7 +51,7 @@ public class RaceUi : MonoBehaviour
     // Track picker, CPU setting, pause menu, quit prompt, intro and flyover.
     VisualElement trackPanel, pauseLayer, pausePanel, quitLayer, introLayer, introFlash, introKart, flyoverLayer, flyCard;
     Image trackImage;
-    Label trackName, trackInfo, trackTwist, trackIndex, cpuLabel, pauseTitle, pauseBy, pauseHint, introHint, flyName, flyLaps, flyTwist;
+    Label resultsTitle, langLabel, trackName, trackInfo, trackTwist, trackIndex, cpuLabel, pauseTitle, pauseBy, pauseHint, introHint, flyName, flyLaps, flyTwist;
     readonly List<Image> trackStars = new List<Image>();
     readonly List<Label> pauseRows = new List<Label>();
     readonly List<Label> introLetters = new List<Label>();
@@ -69,7 +69,7 @@ public class RaceUi : MonoBehaviour
     public string HudLap(int i) => huds[i]?.lap.text;
     public string HudItem(int i) => huds[i]?.item.text;
     public bool HudVisible(int i) => huds[i] != null && huds[i].root.style.display == DisplayStyle.Flex;
-    public bool FinalLapBannerShown(int i) => huds[i] != null && huds[i].banner.text.Contains("FINAL");
+    public bool FinalLapBannerShown(int i) => huds[i] != null && huds[i].banner.text == Loc.T("race.final_lap");
     public int MinimapDots => minimap?.DotCount ?? 0;
     public int ResultRows => resultsTable?.childCount ?? 0;
     public bool LobbyVisible => lobby != null && lobby.style.display == DisplayStyle.Flex;
@@ -78,6 +78,26 @@ public class RaceUi : MonoBehaviour
     public bool FlyoverCardVisible => flyoverLayer != null && flyoverLayer.style.display == DisplayStyle.Flex;
     public string TrackCardText => trackName?.text;
     public string CpuText => cpuLabel?.text;
+    public string LobbyStatusText => readyStatus?.text;
+    public string PauseTitleText => pauseTitle?.text;
+    public string ResultsTitleText => resultsTitle?.text;
+    public string LanguageText => langLabel?.text;
+
+    Label glyphSample;
+    /// <summary>Test hook: a big sample line with every Spanish glyph, in the UI fonts.</summary>
+    public void ShowGlyphSample(bool on)
+    {
+        if (glyphSample == null)
+        {
+            glyphSample = Text("ÁÉÍÓÚ ÑÜ áéíóú ñü ¡¿ º ° 1.º 2.º\n¡ÚLTIMA VUELTA! ¿SALIR? AÑO PINGÜINO", 64, Color.white, titleFont, 4);
+            glyphSample.style.position = Position.Absolute;
+            glyphSample.style.left = 40; glyphSample.style.right = 40; glyphSample.style.top = 380;
+            glyphSample.style.backgroundColor = new Color(0.05f, 0.06f, 0.1f, 0.95f);
+            glyphSample.style.unityTextAlign = TextAnchor.MiddleCenter;
+            root.Add(glyphSample);
+        }
+        glyphSample.style.display = on ? DisplayStyle.Flex : DisplayStyle.None;
+    }
     public string PauseSelectedText => pauseRows.FirstOrDefault(r => r.style.color == Gold)?.text;
     public bool ResultsVisible => results != null && results.style.display == DisplayStyle.Flex;
     public int LobbyCardsFilled => cards.Count(c => c != null && c.character.text.Length > 0 && c.root.style.opacity.value > 0.9f);
@@ -98,7 +118,36 @@ public class RaceUi : MonoBehaviour
     {
         doc = GetComponent<UIDocument>();
         rm = GetComponent<RaceManager>();
+        Loc.Init();
         Build();
+        Loc.Changed += Rebuild;
+    }
+
+    void OnDisable() => Loc.Changed -= Rebuild;
+
+    /// <summary>Language switched: every label is rebuilt in the new language.</summary>
+    void Rebuild()
+    {
+        built = false;
+        standingsLines.Clear();
+        pauseRows.Clear();
+        glyphSample = null;
+        introLetters.Clear();
+        sparks.Clear();
+        trackStars.Clear();
+        Build();
+        lastPhase = (RacePhase)(-1);
+    }
+
+    /// <summary>"P1 Name" / "CPU Name" in the current language (character names are proper nouns).</summary>
+    string DisplayName(RaceManager.Racer r) =>
+        $"{(r.Human != null ? r.Human.Label : Loc.T("race.cpu"))} {rm.Roster[r.Character].displayName}";
+
+    static string TrackTwist(TrackDefinition def)
+    {
+        string key = "twist." + def.id;
+        string t = Loc.T(key);
+        return t == key ? def.twist : t;
     }
 
     // ================================================================================================
@@ -200,7 +249,7 @@ public class RaceUi : MonoBehaviour
         join.style.alignItems = Align.Center;
         join.style.paddingTop = 16;
         lobby.Add(join);
-        var joinTitle = Text("SCAN TO JOIN", 38, new Color(0.15f, 0.17f, 0.24f), bodyFont, 0);
+        var joinTitle = Text(Loc.T("lobby.scan"), 38, new Color(0.15f, 0.17f, 0.24f), bodyFont, 0);
         join.Add(joinTitle);
         qrImage = new Image { scaleMode = ScaleMode.ScaleToFit, pickingMode = PickingMode.Ignore };
         qrImage.style.width = 290; qrImage.style.height = 290; qrImage.style.marginTop = 8;
@@ -215,7 +264,7 @@ public class RaceUi : MonoBehaviour
         serverError = Text("", 22, new Color(0.85f, 0.2f, 0.2f), bodyFont, 0);
         serverError.style.whiteSpace = WhiteSpace.Normal; serverError.style.width = 500;
         join.Add(serverError);
-        var wifi = Text("Same Wi-Fi as this PC. Turn the phone sideways.", 15, new Color(0.3f, 0.32f, 0.4f), narrowFont, 0);
+        var wifi = Text(Loc.T("lobby.wifi"), 15, new Color(0.3f, 0.32f, 0.4f), narrowFont, 0);
         wifi.style.marginTop = 6;
         wifi.style.width = 520;
         wifi.style.whiteSpace = WhiteSpace.Normal;
@@ -235,8 +284,7 @@ public class RaceUi : MonoBehaviour
         readyStatus.style.left = 0; readyStatus.style.right = 0; readyStatus.style.top = 950;
         readyStatus.style.unityTextAlign = TextAnchor.MiddleCenter;
         lobby.Add(readyStatus);
-        var hints = Text("KEYBOARD: [ENTER] JOIN/READY  [LEFT/RIGHT] PICK  [Q/E] TRACK  [C] CPU RACERS  [SPACE] START  [BACKSPACE] LEAVE  [ESC] QUIT\n" +
-                         "DRIVE: WASD/ARROWS  SPACE TAP = HOP, HOLD+STEER = DRIFT  E/SHIFT = ITEM  ESC/P = PAUSE  [M] MUSIC  [F2] LOOK",
+        var hints = Text(Loc.T("lobby.keys1") + "\n" + Loc.T("lobby.keys2"),
             18, new Color(1f, 1f, 1f, 0.8f), narrowFont, 2);
         hints.style.position = Position.Absolute;
         hints.style.left = 0; hints.style.right = 0; hints.style.top = 1005;
@@ -250,7 +298,7 @@ public class RaceUi : MonoBehaviour
         trackPanel = Panel(panelTexture, new Color(0.2f, 0.23f, 0.3f, 0.97f));
         Abs(trackPanel, 60, 695, 560, 240);
         lobby.Add(trackPanel);
-        var header = Text("TRACK", 22, Gold, bodyFont, 2);
+        var header = Text(Loc.T("lobby.track"), 22, Gold, bodyFont, 2);
         Abs(header, 18, 8, 120, 28);
         trackPanel.Add(header);
         trackIndex = Text("", 16, new Color(1, 1, 1, 0.7f), narrowFont, 1);
@@ -287,9 +335,12 @@ public class RaceUi : MonoBehaviour
         trackTwist.style.overflow = Overflow.Hidden;
         trackPanel.Add(trackTwist);
 
-        cpuLabel = Text("", 22, Color.white, bodyFont, 2);
-        Abs(cpuLabel, 16, 200, 528, 30);
+        cpuLabel = Text("", 17, Color.white, bodyFont, 2);
+        Abs(cpuLabel, 16, 190, 528, 22);
         trackPanel.Add(cpuLabel);
+        langLabel = Text("", 17, new Color(0.75f, 0.9f, 1f), bodyFont, 2);
+        Abs(langLabel, 16, 213, 528, 22);
+        trackPanel.Add(langLabel);
     }
 
     Card BuildCard(int slot, float x, float y)
@@ -320,7 +371,7 @@ public class RaceUi : MonoBehaviour
         c.stats = new VisualElement { pickingMode = PickingMode.Ignore };
         Abs(c.stats, 362, 74, 200, 200);
         c.root.Add(c.stats);
-        string[] labels = { "SPEED", "ACCEL", "HANDLING" };
+        string[] labels = { Loc.T("stat.speed"), Loc.T("stat.accel"), Loc.T("stat.handling") };
         for (int s = 0; s < 3; s++)
         {
             var l = Text(labels[s], 20, new Color(1, 1, 1, 0.8f), narrowFont, 2);
@@ -343,11 +394,11 @@ public class RaceUi : MonoBehaviour
         c.ready = Panel(panelYellowTexture, new Color(0.45f, 1f, 0.5f));
         Abs(c.ready, 400, 280, 160, 48);
         c.ready.style.alignItems = Align.Center; c.ready.style.justifyContent = Justify.Center;
-        c.readyLabel = Text("READY!", 30, Color.white, bodyFont, 2);
+        c.readyLabel = Text(Loc.T("lobby.ready"), 30, Color.white, bodyFont, 2);
         c.ready.Add(c.readyLabel);
         c.root.Add(c.ready);
 
-        c.empty = Text("Open the URL on a phone\nto join", 26, new Color(1, 1, 1, 0.5f), bodyFont, 2);
+        c.empty = Text(Loc.T("lobby.empty"), 26, new Color(1, 1, 1, 0.5f), bodyFont, 2);
         c.empty.style.position = Position.Absolute;
         c.empty.style.left = 20; c.empty.style.right = 20; c.empty.style.top = 130;
         c.empty.style.whiteSpace = WhiteSpace.Normal;
@@ -425,7 +476,7 @@ public class RaceUi : MonoBehaviour
 
         h.speed = Text("", 32, Color.white, bodyFont, 1);
         h.banner = Text("", 110, Gold, titleFont, 3);
-        h.wrongWay = Text("WRONG WAY!", 90, new Color(1f, 0.25f, 0.2f), titleFont, 3);
+        h.wrongWay = Text(Loc.T("race.wrong_way"), 90, new Color(1f, 0.25f, 0.2f), titleFont, 3);
         h.centre = Text("", 110, Gold, titleFont, 3);
         foreach (var l in new[] { h.speed, h.banner, h.wrongWay, h.centre })
         {
@@ -468,14 +519,14 @@ public class RaceUi : MonoBehaviour
         var panel = Panel(panelTexture, new Color(0.14f, 0.16f, 0.22f, 0.94f));
         Abs(panel, 1060, 140, 800, 800);
         results.Add(panel);
-        var title = Text("RESULTS", 90, Gold, titleFont, 6);
+        var title = resultsTitle = Text(Loc.T("results.title"), 90, Gold, titleFont, 6);
         Abs(title, 0, 20, 800, 100);
         title.style.unityTextAlign = TextAnchor.MiddleCenter;
         panel.Add(title);
         resultsTable = new VisualElement { name = "results-table", pickingMode = PickingMode.Ignore };
         Abs(resultsTable, 30, 140, 740, 540);
         panel.Add(resultsTable);
-        resultsPrompt = Text("START on the leader's phone or [Enter]: back to the lobby   -   [Esc] pause menu", 18, new Color(1, 1, 1, 0.85f), narrowFont, 1);
+        resultsPrompt = Text(Loc.T("results.prompt"), 18, new Color(1, 1, 1, 0.85f), narrowFont, 1);
         Abs(resultsPrompt, 20, 700, 760, 60);
         resultsPrompt.style.whiteSpace = WhiteSpace.Normal;
         resultsPrompt.style.unityTextAlign = TextAnchor.MiddleCenter;
@@ -496,11 +547,11 @@ public class RaceUi : MonoBehaviour
         var panel = Panel(panelTexture, new Color(0.16f, 0.18f, 0.25f, 0.98f));
         Abs(panel, 560, 380, 800, 300);
         quitLayer.Add(panel);
-        var t = Text("QUIT GAME?", 80, Gold, titleFont, 5);
+        var t = Text(Loc.T("quit.title"), 80, Gold, titleFont, 5);
         Abs(t, 0, 40, 800, 100);
         t.style.unityTextAlign = TextAnchor.MiddleCenter;
         panel.Add(t);
-        var h = Text("[ENTER] YES, QUIT        [ESC] NO, BACK TO THE LOBBY", 24, Color.white, bodyFont, 2);
+        var h = Text(Loc.T("quit.lobby_hint"), 24, Color.white, bodyFont, 2);
         Abs(h, 0, 190, 800, 40);
         h.style.unityTextAlign = TextAnchor.MiddleCenter;
         panel.Add(h);
@@ -513,7 +564,7 @@ public class RaceUi : MonoBehaviour
         pausePanel = Panel(panelTexture, new Color(0.15f, 0.17f, 0.24f, 0.97f));
         Abs(pausePanel, 610, 190, 700, 700);
         pauseLayer.Add(pausePanel);
-        pauseTitle = Text("PAUSED", 110, Gold, titleFont, 6);
+        pauseTitle = Text(Loc.T("pause.title"), 110, Gold, titleFont, 6);
         Abs(pauseTitle, 0, 26, 700, 130);
         pauseTitle.style.unityTextAlign = TextAnchor.MiddleCenter;
         pausePanel.Add(pauseTitle);
@@ -544,9 +595,9 @@ public class RaceUi : MonoBehaviour
         Show(pauseLayer, on);
         if (!on) return;
         bool confirm = rm.PauseQuitConfirm;
-        pauseTitle.text = confirm ? "QUIT GAME?" : "PAUSED";
-        pauseBy.text = confirm ? "The game will close." : $"PAUSED BY {rm.PausedBy}";
-        string[] items = confirm ? new[] { "NO, GO BACK", "YES, QUIT" } : RaceManager.PauseItems;
+        pauseTitle.text = confirm ? Loc.T("quit.title") : Loc.T("pause.title");
+        pauseBy.text = confirm ? Loc.T("pause.closes") : Loc.T("pause.by", rm.PausedBy == "HOST" ? Loc.T("pause.host") : rm.PausedBy);
+        string[] items = confirm ? new[] { Loc.T("pause.no"), Loc.T("pause.yes") } : RaceManager.PauseItems.Select(k => Loc.T(k)).ToArray();
         int selected = confirm ? rm.ConfirmSelection : rm.PauseSelection;
         float pulse = 1f + Mathf.Sin(Time.unscaledTime * 6f) * 0.03f; // animates while the game is frozen
         for (int i = 0; i < pauseRows.Count; i++)
@@ -561,7 +612,7 @@ public class RaceUi : MonoBehaviour
             row.style.backgroundColor = sel ? new Color(1f, 1f, 1f, 0.1f) : new Color(0, 0, 0, 0);
             row.style.scale = new Scale(sel ? new Vector3(pulse, pulse, 1f) : Vector3.one);
         }
-        pauseHint.text = "[UP/DOWN] CHOOSE   [ENTER] SELECT   [ESC] " + (confirm ? "BACK" : "RESUME") + "\nor use the menu on the leader's phone";
+        pauseHint.text = Loc.T("pause.hint", Loc.T(confirm ? "pause.hint_back" : "pause.hint_resume"));
     }
 
     static readonly string IntroWord = "KART PARTY";
@@ -622,7 +673,7 @@ public class RaceUi : MonoBehaviour
             sparks.Add(s);
         }
 
-        introHint = Text("PRESS ANY KEY", 30, Color.white, bodyFont, 3);
+        introHint = Text(Loc.T("intro.press"), 30, Color.white, bodyFont, 3);
         introHint.style.position = Position.Absolute;
         introHint.style.left = 0; introHint.style.right = 0; introHint.style.top = 760;
         introHint.style.unityTextAlign = TextAnchor.MiddleCenter;
@@ -717,7 +768,7 @@ public class RaceUi : MonoBehaviour
         Abs(flyTwist, 34, 142, 840, 40);
         flyTwist.style.whiteSpace = WhiteSpace.Normal;
         flyCard.Add(flyTwist);
-        var skip = Text("ANY KEY / LEADER'S PHONE: SKIP", 18, new Color(1, 1, 1, 0.7f), narrowFont, 2);
+        var skip = Text(Loc.T("fly.skip"), 18, new Color(1, 1, 1, 0.7f), narrowFont, 2);
         Abs(skip, 1400, 40, 480, 30);
         skip.style.unityTextAlign = TextAnchor.UpperRight;
         flyoverLayer.Add(skip);
@@ -732,8 +783,8 @@ public class RaceUi : MonoBehaviour
         TrackDefinition def = rm.ActiveTrack;
         flyName.text = def.displayName.ToUpperInvariant();
         flyName.style.color = def.accent;
-        flyLaps.text = $"{rm.Laps} LAPS  -  {def.Length:F0} M";
-        flyTwist.text = def.twist;
+        flyLaps.text = Loc.T("fly.laps", rm.Laps, def.Length.ToString("F0"));
+        flyTwist.text = TrackTwist(def);
         float t = Time.time - rm.PhaseStartTime;
         flyCard.style.translate = new Translate(Mathf.Lerp(-1000f, 0f, Mathf.Clamp01(t * 3f)), 0);
     }
@@ -744,19 +795,20 @@ public class RaceUi : MonoBehaviour
         int sel = rm.SelectedTrack;
         bool random = rm.RandomSelected;
         TrackDefinition def = random ? null : rm.Tracks[sel];
-        trackIndex.text = $"{sel + 1}/{n + 1}   < [Q]  [E] >";
-        trackName.text = random ? "RANDOM" : def.displayName.ToUpperInvariant();
+        trackIndex.text = Loc.T("lobby.track_keys", sel + 1, n + 1);
+        trackName.text = random ? Loc.T("lobby.random") : def.displayName.ToUpperInvariant();
         trackName.style.fontSize = trackName.text.Length > 13 ? 19 : 24; // long names stay on one line
         trackName.style.color = random ? Color.white : def.accent;
-        trackInfo.text = random ? "Any of the tracks" : $"{def.Length:F0} m  -  {def.laps} laps";
-        trackTwist.text = random ? "Picked when the race starts." : def.twist;
+        trackInfo.text = random ? Loc.T("lobby.random_info") : Loc.T("lobby.track_info", def.Length.ToString("F0"), def.laps);
+        trackTwist.text = random ? Loc.T("lobby.random_twist") : TrackTwist(def);
         trackImage.image = def != null ? def.Thumbnail : null;
         for (int i = 0; i < trackStars.Count; i++)
         {
             Show(trackStars[i], !random);
             trackStars[i].tintColor = def != null && i < def.difficulty ? Gold : new Color(1, 1, 1, 0.18f);
         }
-        cpuLabel.text = $"CPU RACERS: {rm.CpuLabel}   [C]";
+        cpuLabel.text = Loc.T("lobby.cpu", rm.CpuLabel);
+        langLabel.text = Loc.T("lobby.lang");
     }
 
     // ================================================================================================
@@ -808,8 +860,8 @@ public class RaceUi : MonoBehaviour
         UpdateTrackPanel();
         qrImage.image = rm.QrTexture;
         urlLabel.text = rm.ServerRunning ? rm.Url : "";
-        otherUrls.text = rm.OtherUrls.Count > 0 ? "Other addresses: " + string.Join("  ", rm.OtherUrls) : "";
-        serverError.text = rm.ServerRunning ? "" : "Phone server not running:\n" + rm.ServerError;
+        otherUrls.text = rm.OtherUrls.Count > 0 ? Loc.T("lobby.other", string.Join("  ", rm.OtherUrls)) : "";
+        serverError.text = rm.ServerRunning ? "" : Loc.T("lobby.server_off", rm.ServerError);
 
         for (int slot = 0; slot < cards.Length; slot++)
         {
@@ -826,7 +878,7 @@ public class RaceUi : MonoBehaviour
                 continue;
             }
             CharacterDefinition def = rm.Roster[p.Character];
-            c.who.text = p.IsKeyboard ? "Keyboard" : p.Connected ? "Phone" : "Phone (reconnecting...)";
+            c.who.text = Loc.T(p.IsKeyboard ? "lobby.keyboard" : p.Connected ? "lobby.phone" : "lobby.phone_lost");
             c.character.text = def.displayName.ToUpperInvariant();
             c.character.style.color = def.uiColor;
             c.preview.image = rm.Preview != null ? rm.Preview.GetTexture(slot) : null;
@@ -842,7 +894,7 @@ public class RaceUi : MonoBehaviour
         }
 
         int ready = rm.Players.Count(x => x.Ready);
-        readyStatus.text = rm.Players.Count == 0 ? "WAITING FOR PLAYERS..." : $"READY {ready}/{rm.Players.Count}  -  THE RACE STARTS WHEN EVERYONE IS READY";
+        readyStatus.text = rm.Players.Count == 0 ? Loc.T("lobby.waiting") : Loc.T("lobby.ready_status", ready, rm.Players.Count);
     }
 
     void UpdateCountdown()
@@ -862,7 +914,7 @@ public class RaceUi : MonoBehaviour
         }
         else
         {
-            text = "GO!";
+            text = Loc.T("race.go");
             color = new Color(0.45f, 1f, 0.45f);
             if (lastCount != 0)
             {
@@ -942,7 +994,7 @@ public class RaceUi : MonoBehaviour
         h.punch = Mathf.MoveTowards(h.punch, 0f, Time.deltaTime * 2.5f);
         Color pc = pos == 1 ? Gold : pos == 2 ? Silver : pos == 3 ? Bronze : Color.white;
         h.position.text = pos.ToString();
-        h.suffix.text = RaceManager.Ordinal(pos).Substring(pos.ToString().Length).ToUpperInvariant();
+        h.suffix.text = Loc.OrdinalSuffix(pos).ToUpperInvariant();
         h.position.style.color = pc;
         h.suffix.style.color = pc;
         h.position.style.fontSize = 150 * s;
@@ -959,7 +1011,7 @@ public class RaceUi : MonoBehaviour
         h.info.style.top = pad;
         h.info.style.alignItems = mirror ? Align.FlexEnd : Align.FlexStart;
         int lap = racer.Lap.DisplayLap;
-        h.lap.text = $"LAP {lap}/{rm.Laps}";
+        h.lap.text = Loc.T("race.lap", lap, rm.Laps);
         h.lap.style.fontSize = 44 * s;
         h.name.text = $"{racer.Human.Label} {rm.Roster[racer.Character].displayName.ToUpperInvariant()}";
         h.name.style.color = racer.Human.Color;
@@ -975,7 +1027,7 @@ public class RaceUi : MonoBehaviour
         h.itemTile.style.marginBottom = 16 * s;
         h.itemTile.style.backgroundColor = show == ItemType.None ? new Color(0.2f, 0.22f, 0.28f) : ItemTable.Tint(show);
         h.itemTile.style.borderTopLeftRadius = h.itemTile.style.borderTopRightRadius = h.itemTile.style.borderBottomLeftRadius = h.itemTile.style.borderBottomRightRadius = 10;
-        h.item.text = show == ItemType.None ? "ITEM" : show == ItemType.Banana ? "BANANA" : ItemTable.Label(show);
+        h.item.text = show == ItemType.None ? Loc.T("race.item") : ItemTable.Label(show);
         h.item.style.fontSize = (show == ItemType.None ? 20 : 22) * s;
         h.item.style.color = show == ItemType.None ? new Color(1, 1, 1, 0.35f) : new Color(0.08f, 0.08f, 0.12f);
         float roll = items != null && items.IsRolling ? 1f + Mathf.Abs(Mathf.Sin(Time.time * 20f)) * 0.08f : 1f;
@@ -986,7 +1038,7 @@ public class RaceUi : MonoBehaviour
             if (h.lastLap > 0 || lap > 1)
             {
                 bool final = lap == rm.Laps;
-                h.banner.text = final ? "FINAL LAP!" : $"LAP {lap}";
+                h.banner.text = final ? Loc.T("race.final_lap") : Loc.T("race.lap_banner", lap);
                 h.banner.style.color = final ? new Color(1f, 0.35f, 0.3f) : Gold;
                 h.bannerStart = Time.time;
                 h.bannerUntil = Time.time + (final ? 2.5f : 1.5f);
@@ -1004,7 +1056,7 @@ public class RaceUi : MonoBehaviour
             h.banner.style.opacity = Mathf.Clamp01((h.bannerUntil - Time.time) * 3f);
         }
 
-        h.speed.text = $"{Mathf.Abs(racer.Kart.ForwardSpeed) * 3.6f:0} KM/H" + (racer.Kart.IsBoosting ? "  TURBO!" : racer.Kart.MiniTurboReady ? "  DRIFT *" : "");
+        h.speed.text = Loc.T("race.speed", (Mathf.Abs(racer.Kart.ForwardSpeed) * 3.6f).ToString("0")) + (racer.Kart.IsBoosting ? "  " + Loc.T("race.turbo") : racer.Kart.MiniTurboReady ? "  " + Loc.T("race.drift") : "");
         h.speed.style.fontSize = 30 * s;
         h.speed.style.bottom = pad;
 
@@ -1027,7 +1079,7 @@ public class RaceUi : MonoBehaviour
         Show(h.centre, finished);
         if (finished)
         {
-            h.centre.text = $"FINISHED {RaceManager.Ordinal(racer.FinishOrder + 1).ToUpperInvariant()}!";
+            h.centre.text = Loc.T("race.finished", Loc.Ordinal(racer.FinishOrder + 1).ToUpperInvariant());
             h.centre.style.fontSize = 90 * s;
             h.centre.style.top = new Length(32, LengthUnit.Percent);
             h.centre.style.color = racer.FinishOrder == 0 ? Gold : Color.white;
@@ -1050,7 +1102,7 @@ public class RaceUi : MonoBehaviour
             Label l = standingsLines[i];
             if (i >= list.Count) { l.text = ""; continue; }
             var r = list[i];
-            l.text = $"{r.Position}. {(r.Human != null ? r.Human.Label : "CPU")} {rm.Roster[r.Character].displayName.ToUpperInvariant()}";
+            l.text = $"{r.Position}. {(r.Human != null ? r.Human.Label : Loc.T("race.cpu"))} {rm.Roster[r.Character].displayName.ToUpperInvariant()}";
             l.style.color = r.Human != null ? r.Human.Color : new Color(0.85f, 0.86f, 0.9f);
         }
     }
@@ -1067,22 +1119,25 @@ public class RaceUi : MonoBehaviour
             row.style.backgroundColor = i % 2 == 0 ? new Color(1, 1, 1, 0.06f) : new Color(0, 0, 0, 0.12f);
             row.style.borderTopLeftRadius = row.style.borderTopRightRadius = row.style.borderBottomLeftRadius = row.style.borderBottomRightRadius = 8;
             Color pc = r.Position == 1 ? Gold : r.Position == 2 ? Silver : r.Position == 3 ? Bronze : Color.white;
-            var pos = Text(RaceManager.Ordinal(r.Position), 44, pc, bodyFont, 3);
+            var pos = Text(Loc.Ordinal(r.Position), 44, pc, bodyFont, 3);
             Abs(pos, 14, 14, 110, 60);
             row.Add(pos);
             var swatch = new VisualElement { pickingMode = PickingMode.Ignore };
             Abs(swatch, 130, 22, 14, 38);
             swatch.style.backgroundColor = r.Human != null ? r.Human.Color : new Color(0.6f, 0.62f, 0.66f);
             row.Add(swatch);
-            var name = Text(r.Name, 30, r.Human != null ? r.Human.Color : Color.white, bodyFont, 3);
-            Abs(name, 158, 20, 330, 44);
+            string shown = DisplayName(r).ToUpperInvariant();
+            var name = Text(shown, shown.Length > 16 ? 22 : 30, r.Human != null ? r.Human.Color : Color.white, bodyFont, 3);
+            Abs(name, 158, shown.Length > 16 ? 26 : 20, 330, 44);
+            name.style.overflow = Overflow.Hidden;
+            name.style.whiteSpace = WhiteSpace.NoWrap;
             row.Add(name);
             string time = r.Lap.Finished ? Format(r.Lap.FinishTime) : "--:--.--";
             var t = Text(time, 30, Color.white, bodyFont, 3);
             Abs(t, 500, 8, 230, 40);
             t.style.unityTextAlign = TextAnchor.UpperRight;
             row.Add(t);
-            var best = Text(r.Lap.BestLap > 0f ? "best " + Format(r.Lap.BestLap) : "", 20, new Color(1, 1, 1, 0.6f), narrowFont, 2);
+            var best = Text(r.Lap.BestLap > 0f ? Loc.T("results.best", Format(r.Lap.BestLap)) : "", 20, new Color(1, 1, 1, 0.6f), narrowFont, 2);
             Abs(best, 500, 48, 230, 26);
             best.style.unityTextAlign = TextAnchor.UpperRight;
             row.Add(best);
@@ -1090,7 +1145,7 @@ public class RaceUi : MonoBehaviour
         }
         var banner = results.Q<Label>("podium-banner");
         var winner = list.FirstOrDefault();
-        banner.text = winner != null ? $"WINNER\n{winner.Name.ToUpperInvariant()}" : "";
+        banner.text = winner == null ? "" : Loc.T(list.Count == 1 ? "results.time_trial" : "results.winner", DisplayName(winner).ToUpperInvariant());
         banner.style.color = Gold;
     }
 

@@ -37,10 +37,10 @@ public static class ItemTable
 
     public static string Label(ItemType t) => t switch
     {
-        ItemType.Banana => "BANANA PEEL",
-        ItemType.Turbo => "TURBO",
-        ItemType.Rocket => "ROCKET",
-        ItemType.Shield => "SHIELD",
+        ItemType.Banana => Loc.T("item.banana"),
+        ItemType.Turbo => Loc.T("item.turbo"),
+        ItemType.Rocket => Loc.T("item.rocket"),
+        ItemType.Shield => Loc.T("item.shield"),
         _ => ""
     };
 

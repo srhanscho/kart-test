@@ -210,6 +210,7 @@ public static partial class RaceSceneBuilder
 
         var root = new GameObject("Track_" + spec.Id).transform;
         var def = root.gameObject.AddComponent<TrackDefinition>();
+        def.id = spec.Id;
         def.displayName = spec.Name;
         def.twist = spec.Twist;
         def.difficulty = spec.Difficulty;

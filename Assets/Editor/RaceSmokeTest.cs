@@ -62,6 +62,11 @@ public static partial class RaceSmokeTest
         int at = Array.IndexOf(args, "-kartTrack");
         if (at >= 0 && at + 1 < args.Length && int.TryParse(args[at + 1], out int n)) firstTrack = Mathf.Max(0, n - 1);
         RaceManager.SkipIntroForTest = false;
+        RaceManager.IntroSecondsForTest = 12f;
+        testLang = Lang.En;
+        at = Array.IndexOf(args, "-kartLang");
+        if (at >= 0 && at + 1 < args.Length) testLang = Loc.Parse(args[at + 1]);
+        Loc.Set(testLang, false); // not saved: the test must not change the user's preference
         RaceManager.QuitHandler = () => quitCalls++; // the test process must keep running
         stage = 0;
         stageStart = EditorApplication.timeSinceStartup;
@@ -140,6 +145,12 @@ public static partial class RaceSmokeTest
                 Ui = rm.GetComponent<RaceUi>();
                 if (!introShot)
                 {
+                    if (!phoneRunning && rm.IntroActive)
+                    {
+                        serverPort = rm.ServerPort;
+                        StartPhone(serverPort); // joins during the intro: it must be told about it
+                        phoneOutbox.Enqueue("hello|smoke-phone-1");
+                    }
                     if (!rm.IntroActive) { Check(false, "start intro is not playing"); introShot = true; }
                     else
                     {
@@ -154,8 +165,11 @@ public static partial class RaceSmokeTest
                 serverPort = rm.ServerPort;
                 Check(true, $"lobby up, server on port {serverPort}, url {rm.Url}, QR={(rm.QrTexture != null ? rm.QrTexture.width + "px" : "none")}");
                 if (firstTrack > 0) rm.SelectTrackForTest(Mathf.Min(firstTrack, rm.Tracks.Count - 1));
-                StartPhone(serverPort);
-                phoneOutbox.Enqueue("hello|smoke-phone-1");
+                if (!phoneRunning)
+                {
+                    StartPhone(serverPort);
+                    phoneOutbox.Enqueue("hello|smoke-phone-1");
+                }
                 phoneOutbox.Enqueue("skip"); // any button on the leader's phone skips the intro
                 phoneOutbox.Enqueue("pick|1");
                 Next("phone joined, skipped the intro and picked");
@@ -182,8 +196,10 @@ public static partial class RaceSmokeTest
                         $"lobby UI: built={Ui != null && Ui.Built}, visible={Ui?.LobbyVisible}, filled player cards={Ui?.LobbyCardsFilled}");
                     Check(am != null && am.Music == MusicState.Lobby && am.MusicPlaying,
                         $"lobby music: state={am?.Music}, playing={am?.MusicPlaying}");
-                    Check(rm.ThumbnailsReady && rm.ActiveTrack.Thumbnail != null && Ui.TrackCardText == rm.ActiveTrack.displayName.ToUpperInvariant() && Ui.CpuText.Contains("FILL"),
+                    Check(rm.ThumbnailsReady && rm.ActiveTrack.Thumbnail != null && Ui.TrackCardText == rm.ActiveTrack.displayName.ToUpperInvariant() && Ui.CpuText.Contains(Loc.T("cpu.fill")),
                         $"lobby track card '{Ui.TrackCardText}' (thumbnail {(rm.ActiveTrack.Thumbnail != null ? rm.ActiveTrack.Thumbnail.width + "px" : "none")}), '{Ui.CpuText}'");
+                    Check(Ui.LobbyStatusText == Loc.T("lobby.ready_status", rm.Players.Count(p => p.Ready), rm.Players.Count) && Ui.LanguageText == Loc.T("lobby.lang"),
+                        $"lobby texts in {Loc.Code}: '{Ui.LobbyStatusText}', '{Ui.LanguageText}'");
                     lobbyUiChecked = true;
                     StartUiShot("ui_lobby.png");
                     return;
@@ -268,7 +284,7 @@ public static partial class RaceSmokeTest
                         $"engine sounds playing on {audios.Count(a => a != null && a.EnginePlaying)}/{audios.Count} karts, pitches " +
                         string.Join(" ", audios.Select(a => a != null ? a.EnginePitch.ToString("F2") : "-")) +
                         $", human karts 2D={audios.Where((a, i) => rm.Standings[i].Human != null).All(a => a.Engine.spatialBlend == 0f)}");
-                    Check(Ui.HudVisible(0) && Ui.HudVisible(1) && !string.IsNullOrEmpty(Ui.HudPosition(0)) && Ui.HudLap(0).StartsWith("LAP") && Ui.MinimapDots == rm.KartCount,
+                    Check(Ui.HudVisible(0) && Ui.HudVisible(1) && !string.IsNullOrEmpty(Ui.HudPosition(0)) && Ui.HudLap(0) == Loc.T("race.lap", P1.Lap.DisplayLap, rm.Laps) && Ui.MinimapDots == rm.KartCount,
                         $"race HUD: P1 '{Ui.HudPosition(0)}' '{Ui.HudLap(0)}' item '{Ui.HudItem(0)}', P2 '{Ui.HudPosition(1)}', minimap dots={Ui.MinimapDots}");
                     rm.DebugSetViewports(1);
                     StartPerf("1P", () => StartUiShot("ui_race_1p.png"));
@@ -604,6 +620,8 @@ public static partial class RaceSmokeTest
                     Check(mustPlay.All(n => am.PlayedCount((Sfx)Enum.Parse(typeof(Sfx), n)) > 0) &&
                           am.PlayedCount(Sfx.Finish1st) + am.PlayedCount(Sfx.FinishPodium) + am.PlayedCount(Sfx.FinishOther) > 0,
                         "sfx played: " + summary);
+                    Check(Ui.ResultsTitleText == Loc.T("results.title") && (Loc.Current == Lang.En) == (Ui.ResultsTitleText == "RESULTS"),
+                        $"results header in {Loc.Code}: '{Ui.ResultsTitleText}'");
                     StartUiShot("ui_results_podium.png");
                     return;
                 }
@@ -639,7 +657,7 @@ public static partial class RaceSmokeTest
                 TopDownShot();
                 CheckThumbnails();
                 string log = phoneLog.ToString();
-                foreach (string expect in new[] { "joined|0|", "pick|", "track|", "cpu|3|FILL", "intro|1", "intro|0", "phase|countdown", "flyover|1|", "count|3", "phase|race", "hud|", "item|roll|1", "buzz|", "result|", "phase|results", "phase|lobby" })
+                foreach (string expect in new[] { "joined|0|", "pick|", "track|", "cpu|3", "lang|" + Loc.Code, "intro|1", "intro|0", "phase|countdown", "flyover|1|", "count|3", "phase|race", "hud|", "item|roll|1", "buzz|", "result|", "phase|results", "phase|lobby" })
                     Check(log.Contains(expect), $"phone received '{expect}'");
                 m5Step = 0;
                 m5Start = EditorApplication.timeSinceStartup;
@@ -815,6 +833,7 @@ public static partial class RaceSmokeTest
         ps.targetTexture = uiTarget;
         ps.clearColor = true;
         ps.colorClearValue = new Color(0f, 0f, 0f, 0f);
+        if (Loc.Current == Lang.Es) file = file.Replace(".png", "_es.png");
         pendingShot = file;
         pendingFrames = 4;
     }

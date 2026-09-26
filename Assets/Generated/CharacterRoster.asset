@@ -166,7 +166,7 @@ MonoBehaviour:
     speed: 1.06
     acceleration: 0.94
     handling: 1
-  - displayName: Gigi Gearbox
+  - displayName: Majo
     uiColor: {r: 0.38431373, g: 0.8392157, b: 0.78431374, a: 1}
     kart:
       prefab: {fileID: 919132149155446097, guid: 666c6de23831dcd41bba604e63637125, type: 3}
@@ -200,7 +200,7 @@ MonoBehaviour:
     speed: 0.97
     acceleration: 1.07
     handling: 0.96
-  - displayName: Chip Chassis
+  - displayName: Samuel
     uiColor: {r: 0.7254902, g: 0.54509807, b: 0.36862746, a: 1}
     kart:
       prefab: {fileID: 919132149155446097, guid: 0b1c7277d404b46438243e1fef06103d, type: 3}

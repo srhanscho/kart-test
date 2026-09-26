@@ -8,6 +8,7 @@ using UnityEngine;
 public class TrackDefinition : MonoBehaviour
 {
     [Header("Info")]
+    public string id = "";
     public string displayName = "Track";
     public string twist = "";
     [Range(1, 3)] public int difficulty = 1;

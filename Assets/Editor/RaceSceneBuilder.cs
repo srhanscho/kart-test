@@ -50,9 +50,9 @@ public static partial class RaceSceneBuilder
         ("Ruby Revs",      "character-female-c", "ToyCarKit/vehicle-racer-low",     1.02f, 0.97f, 1.03f, "#E8506E", -0.08f, 0.55f),
         ("Nova Nitro",     "character-female-d", "ToyCarKit/vehicle-racer",         1.03f, 1.00f, 0.98f, "#5AB0FF", -0.08f, 0.55f),
         ("Sally Skid",     "character-female-e", "ToyCarKit/vehicle-speedster",     1.06f, 0.94f, 1.00f, "#FFD447", -0.08f, 0.55f),
-        ("Gigi Gearbox",   "character-female-f", "ToyCarKit/vehicle-suv",           0.96f, 1.04f, 1.01f, "#62D6C8", -0.08f, 0.55f),
+        ("Majo",           "character-female-f", "ToyCarKit/vehicle-suv",           0.96f, 1.04f, 1.01f, "#62D6C8", -0.08f, 0.55f),
         ("Otto Overdrive", "character-male-e",   "ToyCarKit/vehicle-truck",         0.97f, 1.07f, 0.96f, "#C7C7C7", 0.24f, 0.38f),
-        ("Chip Chassis",   "character-male-f",   "ToyCarKit/vehicle-vintage-racer", 0.98f, 0.98f, 1.05f, "#B98B5E", -0.08f, 0.55f),
+        ("Samuel",         "character-male-f",   "ToyCarKit/vehicle-vintage-racer", 0.98f, 0.98f, 1.05f, "#B98B5E", -0.08f, 0.55f),
     };
 
     struct Opening

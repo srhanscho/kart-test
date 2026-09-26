@@ -101,6 +101,8 @@ public static partial class RaceSmokeTest
     }
 
     static SimPhone phone2;
+    static Lang testLang;
+    static string statusBefore;
     static int firstTrack, expectCard, quitCalls, quitsBefore, m5Step, denyBefore;
     static double m5Start;
     static bool introShot, flyoverShot, flyoverPhoneChecked;
@@ -163,7 +165,7 @@ public static partial class RaceSmokeTest
                 if (M5Elapsed < 1) return false;
                 Check(phone2.Received("joined|2|") && phone2.Log.ToString().Split('\n').Any(l => l.StartsWith("joined|2|") && l.TrimEnd().EndsWith("|0")),
                     "second phone joined as P3 (not the leader)");
-                Check(log1.Contains("cpu|0|OFF") && phone2.Received("cpu|0|OFF") && Ui.CpuText.Contains("OFF"),
+                Check(log1.Contains("cpu|0") && phone2.Received("cpu|0") && Ui.CpuText == Loc.T("lobby.cpu", Loc.T("cpu.off")),
                     $"CPU racers OFF shown in the lobby ('{Ui.CpuText}') and on both phones");
                 Check(phone2.Received($"track|{expectCard}|"), "second phone shows the chosen track");
                 StartUiShot("ui_lobby_track_cpu_off.png");
@@ -179,8 +181,45 @@ public static partial class RaceSmokeTest
                 Check(rm.SelectedTrack == expectCard && rm.CpuSetting == 0 && rm.QuitRequests == quitsBefore && quitCalls == 0
                       && phone2.Received("denied|track") && phone2.Received("denied|cpu") && phone2.Received("denied|quit"),
                     $"non-leader phone refused: track, CPU setting and quit unchanged (quit requests +{rm.QuitRequests - quitsBefore})");
+                statusBefore = Ui.LobbyStatusText;
+                Lang other = testLang == Lang.Es ? Lang.En : Lang.Es;
+                phone2.Outbox.Enqueue("lang|" + (other == Lang.Es ? "es" : "en")); // not the leader: refused
+                phoneOutbox.Enqueue("lang|" + (other == Lang.Es ? "es" : "en"));
+                M5Next("leader phone switches the game language");
+                m5Step = 30;
+                return false;
+
+            case 30: // (numbered out of order: inserted step) language switched -> check, glyphs, switch back
+                if (M5Timeout(4, "language switch did not happen")) return false;
+                if (Loc.Current == testLang || M5Elapsed < 0.6) return false;
+                phone2.Pump();
+                string code = Loc.Code;
+                Check(Ui.LobbyStatusText != statusBefore && Ui.LobbyStatusText == Loc.T("lobby.ready_status", rm.Players.Count(p => p.Ready), rm.Players.Count)
+                      && Ui.LanguageText == Loc.T("lobby.lang") && Ui.TrackCardText == rm.ActiveTrack.displayName.ToUpperInvariant()
+                      && phoneLog.ToString().Contains("lang|" + code) && phone2.Received("lang|" + code) && phone2.Received("denied|lang"),
+                    $"leader phone switched the game language to {code}: lobby re-rendered ('{statusBefore}' -> '{Ui.LobbyStatusText}'), both phones told, non-leader refused");
+                Ui.ShowGlyphSample(true);
+                StartUiShot(Loc.Current == Lang.Es ? "glyphs.png" : "lobby_other_language.png");
+                M5Next("glyph sample");
+                m5Step = 32;
+                return false;
+
+            case 32:
+                if (M5Elapsed < 0.5) return false;
+                Ui.ShowGlyphSample(false);
+                phoneOutbox.Enqueue("lang|" + (testLang == Lang.Es ? "es" : "en"));
+                M5Next("language back");
+                m5Step = 34;
+                return false;
+
+            case 34:
+                if (M5Timeout(4, "language did not switch back")) return false;
+                if (Loc.Current != testLang || M5Elapsed < 0.4) return false;
+                Check(Ui.LobbyStatusText == statusBefore, $"language back to {Loc.Code}: '{Ui.LobbyStatusText}'");
                 phoneOutbox.Enqueue("quit|yes"); // leader EXIT, confirmed on the phone -> quit hook (the test keeps running)
-                M5Next("leader phone EXIT -> quit");
+                m5Step = 4;
+                m5Start = EditorApplication.timeSinceStartup;
+                Log("M5: leader phone EXIT -> quit");
                 return false;
 
             case 4:
@@ -255,6 +294,8 @@ public static partial class RaceSmokeTest
                     $"game frozen while paused: karts moved {moved:F3} m, race clock {frozenTime:F2}->{rm.TimeSinceStart:F2} s, pause menu visible={Ui.PauseMenuVisible}");
                 Check(log1.Contains("pause|1|P1|1|0|0") && phone2.Received("pause|1|P1|0|"),
                     "pause menu sent to the leader phone; the other phone shows 'PAUSED by P1'");
+                Check(Ui.PauseTitleText == Loc.T("pause.title") && Ui.PauseSelectedText != null && Ui.PauseSelectedText.Contains(Loc.T("pause.resume")),
+                    $"pause menu in {Loc.Code}: '{Ui.PauseTitleText}', selected '{Ui.PauseSelectedText}'");
                 StartUiShot("ui_pause.png");
                 M5Next("pause menu screenshot");
                 return false;

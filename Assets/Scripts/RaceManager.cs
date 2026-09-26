@@ -24,7 +24,8 @@ public class RaceManager : MonoBehaviour
     };
 
     /// <summary>Pause menu entries (same order on the TV and the leader's phone).</summary>
-    public static readonly string[] PauseItems = { "RESUME", "RESTART RACE", "BACK TO LOBBY", "QUIT GAME" };
+    /// <summary>Localization keys of the pause menu entries (Loc.T gives the text).</summary>
+    public static readonly string[] PauseItems = { "pause.resume", "pause.restart", "pause.lobby", "pause.quit" };
     public const int PauseResume = 0, PauseRestart = 1, PauseLobby = 2, PauseQuit = 3;
 
     /// <summary>What "Quit game" does. Replaced by tests so the test process keeps running.</summary>
@@ -132,7 +133,7 @@ public class RaceManager : MonoBehaviour
     int cpuOption = 3;
     public int CpuOption => cpuOption;
     public int CpuSetting => CpuOptions[cpuOption];
-    public string CpuLabel => CpuSetting < 0 ? "FILL TO 6" : CpuSetting == 0 ? "OFF" : CpuSetting.ToString();
+    public string CpuLabel => CpuSetting < 0 ? Loc.T("cpu.fill") : CpuSetting == 0 ? Loc.T("cpu.off") : CpuSetting.ToString();
 
     public void CycleCpu(int direction)
     {
@@ -150,7 +151,16 @@ public class RaceManager : MonoBehaviour
         BroadcastCpu();
     }
 
-    void BroadcastCpu() => Broadcast($"cpu|{cpuOption}|{CpuLabel}");
+    /// <summary>Game language (PC UI, and phones that have no local override). Saved in PlayerPrefs.</summary>
+    public void SetLanguage(Lang lang)
+    {
+        if (lang == Loc.Current) return;
+        Loc.Set(lang);
+        GameAudio.Play(Sfx.UiMove);
+        Broadcast("lang|" + Loc.Code);
+    }
+
+    void BroadcastCpu() => Broadcast($"cpu|{cpuOption}"); // phones show the option in their own language
 
     int CpuCountFor(int humans)
     {
@@ -231,6 +241,7 @@ public class RaceManager : MonoBehaviour
     void Awake()
     {
         Instance = this;
+        Loc.Init();
         rng = new System.Random();
         foreach (var kart in karts)
         {
@@ -276,7 +287,9 @@ public class RaceManager : MonoBehaviour
     public bool IntroActive { get; private set; }
     /// <summary>Seconds since the intro started (unscaled).</summary>
     public float IntroTime => Time.unscaledTime - introStart;
-    public float IntroSeconds => introSeconds;
+    public float IntroSeconds => IntroSecondsForTest > 0f ? IntroSecondsForTest : introSeconds;
+    /// <summary>Tests lengthen the intro so a slow machine still sees it before skipping.</summary>
+    public static float IntroSecondsForTest = -1f;
     public int IntrosPlayed { get; private set; }
 
     void BeginIntro()
@@ -302,7 +315,7 @@ public class RaceManager : MonoBehaviour
     /// <summary>Slow orbit of the lobby track under the logo.</summary>
     void TickIntro()
     {
-        if (IntroTime >= introSeconds || (!Application.isBatchMode && Input.anyKeyDown))
+        if (IntroTime >= IntroSeconds || (!Application.isBatchMode && Input.anyKeyDown))
         {
             SkipIntro();
             return;
@@ -460,7 +473,7 @@ public class RaceManager : MonoBehaviour
     public int ActiveTrackIndex => activeTrack;
     public TrackDefinition ActiveTrack => activeTrack >= 0 ? tracks[activeTrack] : null;
     public bool ThumbnailsReady { get; private set; }
-    public string TrackCardName(int index) => index >= tracks.Length ? "RANDOM" : tracks[index].displayName;
+    public string TrackCardName(int index) => index >= tracks.Length ? Loc.T("lobby.random") : tracks[index].displayName;
 
     /// <summary>Enables one track (all others off), applies its sky/lighting and points the race logic at it.</summary>
     void ActivateTrack(int index)
@@ -750,7 +763,7 @@ public class RaceManager : MonoBehaviour
             // Autopilot after the line, like the real thing.
             r.Ai = new AiKartInput(r.Kart, track, rng, r.Items);
             r.Kart.SetInput(r.Ai);
-            if (!r.Human.IsKeyboard) server?.Send(r.Human.ConnectionId, $"result|You finished {Ordinal(r.FinishOrder + 1)}!");
+            if (!r.Human.IsKeyboard) server?.Send(r.Human.ConnectionId, $"result|{r.FinishOrder + 1}|{racers.Count}");
             GameAudio.Play(r.FinishOrder == 0 ? Sfx.Finish1st : r.FinishOrder < 3 ? Sfx.FinishPodium : Sfx.FinishOther);
         }
         bool humansDone = humanRacers.All(h => h.Lap.Finished);
@@ -780,7 +793,7 @@ public class RaceManager : MonoBehaviour
         Podium?.Show(roster, standings.Take(3).Select(x => x.Character).ToList());
         foreach (var h in humanRacers)
             if (h.Human != null && !h.Human.IsKeyboard)
-                server?.Send(h.Human.ConnectionId, $"result|You finished {Ordinal(h.Position)}!");
+                server?.Send(h.Human.ConnectionId, $"result|{h.Position}|{racers.Count}");
         Broadcast("phase|results");
     }
 
@@ -1014,7 +1027,7 @@ public class RaceManager : MonoBehaviour
         foreach (var h in humanRacers)
         {
             if (h.Human == null || h.Human.IsKeyboard || h.Human.ConnectionId < 0) continue;
-            server.Send(h.Human.ConnectionId, $"hud|{Ordinal(h.Position)}/{racers.Count}|{h.Lap.DisplayLap}/{laps}");
+            server.Send(h.Human.ConnectionId, $"hud|{h.Position}|{racers.Count}|{h.Lap.DisplayLap}|{laps}");
         }
     }
 
@@ -1156,6 +1169,13 @@ public class RaceManager : MonoBehaviour
                     else server?.Send(conn, "denied|track");
                 }
                 break;
+            case "lang": // leader's LANGUAGE setting: the whole game (PC + phones that follow it)
+                if (player != null && parts.Length >= 2 && Phase == RacePhase.Lobby)
+                {
+                    if (IsLeader(player)) SetLanguage(Loc.Parse(parts[1]));
+                    else server?.Send(conn, "denied|lang");
+                }
+                break;
             case "cpu":
                 if (player != null && parts.Length >= 2 && Phase == RacePhase.Lobby)
                 {
@@ -1222,7 +1242,8 @@ public class RaceManager : MonoBehaviour
         server.Send(conn, "phase|" + PhaseName());
         SendPick(player);
         SendTrack(player);
-        server.Send(conn, $"cpu|{cpuOption}|{CpuLabel}");
+        server.Send(conn, $"cpu|{cpuOption}");
+        server.Send(conn, "lang|" + Loc.Code);
         if (IntroActive) server.Send(conn, "intro|1");
         if (FlyoverActive) server.Send(conn, $"flyover|1|{ActiveTrack.displayName}|{laps}");
         if (Paused) BroadcastPause();
@@ -1350,7 +1371,7 @@ public class RaceManager : MonoBehaviour
     void Broadcast(string text) => server?.Broadcast(text);
 
     /// <summary>
-    /// PC keys. Lobby: Enter join/ready, Left/Right (A/D) character, Q/E or Tab track, C CPU racers,
+    /// PC keys. Lobby: Enter join/ready, Left/Right (A/D) character, Q/E or Tab track, C CPU racers, L language,
     /// Backspace leave, Space start, Esc quit prompt. Race/results: Esc or P pause menu (Up/Down or W/S, Enter).
     /// </summary>
     void HandleKeyboard()
@@ -1412,6 +1433,7 @@ public class RaceManager : MonoBehaviour
                     if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D)) CyclePick(kb, 1);
                 }
                 if (Input.GetKeyDown(KeyCode.C)) CycleCpu(1);
+                if (Input.GetKeyDown(KeyCode.L)) SetLanguage(Loc.Current == Lang.Es ? Lang.En : Lang.Es);
                 if (Input.GetKeyDown(KeyCode.Q)) CycleTrack(-1);
                 if (Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.Tab)) CycleTrack(1);
                 if (kb != null && (Input.GetKeyDown(KeyCode.Backspace) || Input.GetKeyDown(KeyCode.Delete))) RemovePlayer(kb);

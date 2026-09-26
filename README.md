@@ -15,11 +15,12 @@ Descomprime el `.zip`, abre `KartParty/KartParty.exe` y escanea el QR con tu cel
 | **Control con el celular** | Escanea el QR en la pantalla de la PC y se abre un control táctil horizontal en el navegador del celular. Funciona con un pequeño servidor WebSocket dentro del juego, por la red Wi-Fi local. Hasta 4 jugadores, con vibración. |
 | **Pantalla dividida** | De 1 a 4 jugadores (pantalla completa, arriba/abajo o cuadrantes), cada uno con su propia cámara y HUD. |
 | **Corredores de la computadora** | Apagados, 2, 4 o completar hasta 6 karts (se elige en el lobby). Siguen la trazada, esquivan obstáculos, usan ítems y ayudan un poco a que la carrera se mantenga pareja. |
-| **12 personajes** | Cada piloto va en su propio kart y tiene velocidad, aceleración y manejo ligeramente distintos. |
+| **12 personajes** | Entre ellos Samuel y Majo. Cada piloto va en su propio kart y tiene velocidad, aceleración y manejo ligeramente distintos. |
 | **Ítems** | Cajas de ítems con ruleta: cáscara de banana, turbo, cohete teledirigido y escudo. Mientras más atrás vas, mejores ítems te tocan. |
 | **Manejo** | Estilo arcade, derrape con mini-turbo, salto, trompos al chocar y un ayudante de rescate que te devuelve a la pista. |
 | **Pistas** | **Night Circuit** (809 m, circuito de juguete iluminado con una subida), **Sunset Grand Prix** (1164 m, asfalto ancho y rápido con boxes y gradas al atardecer), **Toy Box Hills** (838 m, pista naranja de dos pisos con lomas que te hacen volar) y **Neon Night Loop** (805 m, angosta y técnica con bloques de neón que se mueven). Se eligen en el lobby, o en modo RANDOM. |
 | **Líder de la partida** | El jugador con el número más bajo es el líder: elige la pista y los corredores de la computadora, inicia la carrera, pausa (continuar / reiniciar / volver al lobby / salir) y puede cerrar el juego desde el lobby. El teclado de la PC siempre tiene estos permisos también. |
+| **Idiomas** | Todo el juego y la página del celular en inglés y español (latinoamericano). La PC arranca en el idioma del sistema; el líder lo cambia en el lobby (`L` o IDIOMA en su celular) y queda guardado. Cada celular sigue el idioma del juego o su propio botón EN/ES en la barra superior. |
 | **Presentación** | Intro animada con el logo al abrir el juego y un sobrevuelo de cámara por la pista antes de cada carrera, al estilo Mario Kart (ambos se pueden saltar). |
 | **Imagen y sonido** | Sombreado tipo caricatura con bordes, brillo (bloom), sonido de motor generado por código y música chiptune (que se acelera en la última vuelta). |
 
@@ -81,6 +82,7 @@ En el lobby, usa ◀ ▶ para elegir personaje y luego toca **READY**. El celula
 | Lobby: elegir personaje | `←` `→` |
 | Lobby: elegir pista (la última opción es RANDOM) | `Q` `E` o `Tab` |
 | Lobby: corredores de la computadora (apagados / 2 / 4 / completar hasta 6) | `C` |
+| Lobby: idioma (English / Español) | `L` |
 | Lobby: salir de la partida | `Retroceso` |
 | Lobby: forzar el inicio | `Espacio` |
 | Lobby: cerrar el juego (pide confirmación) | `Esc`, luego `Enter` = sí, `Esc` = no |
