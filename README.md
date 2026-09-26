@@ -2,6 +2,10 @@
 
 Un juego de karts para jugar en el sillón, de 1 a 4 jugadores, hecho en Unity 6, donde **cada jugador usa su celular como control**. No hay que instalar ninguna app: los celulares escanean un código QR y se abre un control táctil en el navegador. Tiene cuatro pistas, y los lugares vacíos de la parrilla se pueden llenar con corredores de la computadora (o no: también se puede jugar 1 contra 1 o contrarreloj en solitario).
 
+### [⬇️ Descargar para Windows](https://github.com/srhanscho/kart-test/releases/latest/download/KartParty-Windows.zip)
+
+Descomprime el `.zip`, abre `KartParty/KartParty.exe` y escanea el QR con tu celular. Todas las versiones están en [Releases](https://github.com/srhanscho/kart-test/releases).
+
 ![Largada de noche](docs/screenshots/race_chasecam_toon_bloom.png)
 
 ## Características
